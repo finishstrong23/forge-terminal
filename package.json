@@ -1,0 +1,13 @@
+{
+  "name": "forge-terminal",
+  "private": true,
+  "scripts": {
+    "dev:web": "cd apps/web && npm run dev",
+    "dev:api": "cd apps/api && uvicorn main:app --reload --port 8000",
+    "build:web": "cd apps/web && npm run build",
+    "test:e2e": "cd apps/web && npx playwright test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

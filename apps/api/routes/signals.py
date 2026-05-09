@@ -1,0 +1,66 @@
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+from sqlalchemy import desc
+
+from core.database import get_db
+from models.token import TokenSignal
+
+router = APIRouter(prefix="/api/v1")
+
+
+@router.get("/signals/latest")
+def get_latest_signals(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=100),
+    min_momentum: float = Query(0, ge=0, le=100),
+    max_rug_risk: float = Query(100, ge=0, le=100),
+    min_confidence: float = Query(0, ge=0, le=100),
+    hide_honeypots: bool = Query(True),
+    db: Session = Depends(get_db),
+):
+    query = db.query(TokenSignal)
+
+    if hide_honeypots:
+        query = query.filter(TokenSignal.is_honeypot == False)
+    if min_momentum > 0:
+        query = query.filter(TokenSignal.momentum_score >= min_momentum)
+    if max_rug_risk < 100:
+        query = query.filter(TokenSignal.rug_risk_score <= max_rug_risk)
+    if min_confidence > 0:
+        query = query.filter(TokenSignal.confidence_score >= min_confidence)
+
+    total = query.count()
+    signals = (
+        query.order_by(desc(TokenSignal.momentum_score))
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+
+    return {
+        "signals": [
+            {
+                "id": s.id,
+                "symbol": s.symbol,
+                "name": s.name,
+                "token_address": s.token_address,
+                "price_usd": s.price_usd,
+                "market_cap": s.market_cap,
+                "volume_1h": s.volume_1h,
+                "liquidity_usd": s.liquidity_usd,
+                "rug_risk_score": s.rug_risk_score,
+                "momentum_score": s.momentum_score,
+                "confidence_score": s.confidence_score,
+                "age_minutes": s.age_minutes,
+                "holder_count": s.total_holders,
+                "buy_ratio_1h": s.buy_ratio_1h,
+                "is_honeypot": s.is_honeypot,
+                "flags": s.flags or [],
+                "explainability": s.explainability_data,
+            }
+            for s in signals
+        ],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
