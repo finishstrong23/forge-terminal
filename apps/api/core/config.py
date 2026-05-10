@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     ALERT_MAX_RUG_RISK: float = 40.0
     MIN_CONFIDENCE_FOR_DISPLAY: float = 50.0
 
+    # SMTP (for alert emails)
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    ALERT_FROM_EMAIL: str = "alerts@forgeterminal.com"
+
     SENTRY_DSN: Optional[str] = None
 
     CORS_ORIGINS: list[str] = [
