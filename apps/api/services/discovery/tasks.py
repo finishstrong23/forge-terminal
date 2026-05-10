@@ -284,8 +284,7 @@ def discover_new_tokens():
     """
     import asyncio
     import os
-    # TODO(phase-1): token_discovery module not yet ported — port when needed
-    from token_discovery import poll_new_tokens, process_discovered_tokens
+    from services.discovery.token_discovery import poll_new_tokens, process_discovered_tokens
 
     if os.getenv("DISCOVERY_ENABLED", "true").lower() != "true":
         return {"status": "disabled"}

@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     HELIUS_RPC_URL: Optional[str] = None
 
     PUMP_FUN_PROGRAM_ID: str = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+    HELIUS_WEBHOOK_ID: Optional[str] = None
+    DISCOVERY_BATCH_SIZE: int = 20
+    DISCOVERY_ENABLED: bool = True
 
     MAX_TOKENS_FREE: int = 20
     FREE_TIER_DELAY_MINUTES: int = 15

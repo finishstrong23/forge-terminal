@@ -65,6 +65,9 @@ class TokenSignal(Base):
     is_honeypot = Column(Boolean, default=False, index=True)
     honeypot_reason = Column(String, nullable=True)
 
+    tier_level = Column(String, default="free", index=True)
+    pump_fun_url = Column(String, nullable=True)
+
     has_graduated = Column(Boolean, default=False)
     graduation_timestamp = Column(DateTime(timezone=True), nullable=True)
     token_metadata = Column(JSON, nullable=True)
