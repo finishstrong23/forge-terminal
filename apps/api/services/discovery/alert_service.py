@@ -82,7 +82,7 @@ def _dispatch_websocket_alert(alert_data: dict):
     """
     try:
         import asyncio
-        from services.discovery.websocket_manager import manager
+        from core.websocket_manager import manager
 
         # Try to get the running event loop
         try:

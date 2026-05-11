@@ -31,7 +31,7 @@ from core.config import settings
 PUMP_FUN_API = "https://frontend-api.pump.fun/coins"
 
 # Use shared rate limiter (also used by token_discovery.py)
-from services.discovery.rate_limiter import rate_limiter
+from core.rate_limiter import rate_limiter
 
 # Backwards-compatible aliases for code that uses the old API
 def _can_call_pump_fun() -> bool:
@@ -336,7 +336,7 @@ class HeliusWebhookProcessor:
 
             # Invalidate cached signal data so fresh scores are served
             try:
-                from services.discovery.redis_cache import cache
+                from core.redis_cache import cache
                 cache.invalidate_pattern("signals:*")
                 cache.delete("stats:overview")
             except Exception:
@@ -854,7 +854,7 @@ async def refresh_token_metadata(
                 print(f"✅ Updated {token.symbol} ({token.token_address[:8]}...)")
 
             # Wait between requests to be extra safe
-            from services.discovery.rate_limiter import PUMP_FUN_MIN_INTERVAL
+            from core.rate_limiter import PUMP_FUN_MIN_INTERVAL
             await asyncio.sleep(PUMP_FUN_MIN_INTERVAL)
 
         except Exception as e:
@@ -1009,7 +1009,7 @@ async def recalculate_all_scores(
 
     # Invalidate cached data after mass recalculation
     try:
-        from services.discovery.redis_cache import cache
+        from core.redis_cache import cache
         cache.invalidate_pattern("signals:*")
         cache.delete("stats:overview")
     except Exception:

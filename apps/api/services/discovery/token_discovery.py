@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 import httpx
 
 from core.config import settings
-from services.discovery.rate_limiter import rate_limiter
+from core.rate_limiter import rate_limiter
 from core.database import SessionLocal
 from models.token import TokenSignal
 
