@@ -19,6 +19,7 @@ from typing import Dict, List, Optional
 import json
 import hashlib
 import hmac
+import secrets
 import httpx
 import asyncio
 
@@ -319,7 +320,6 @@ class HeliusWebhookProcessor:
             signal.explainability_data = scores['explainability_data']
 
             # Determine tier visibility based on age
-            # TODO(phase-1): tier_level column not on TokenSignal model yet — add in migration
             signal.tier_level = self._determine_tier(signal.age_minutes or 0)
 
             # Update timestamp
@@ -406,12 +406,10 @@ class HeliusWebhookProcessor:
             has_graduated=has_graduated,
             market_cap=market_cap,
             token_metadata=metadata,
-            # TODO(phase-1): tier_level column not on TokenSignal model yet — add in migration
             tier_level="ultra",  # Start as ultra, will be updated based on age
             scan_timestamp=datetime.now(timezone.utc),
             pair_created_at=datetime.now(timezone.utc),
             age_minutes=0.0,
-            # TODO(phase-1): pump_fun_url column not on TokenSignal model yet — add in migration
             pump_fun_url=f"https://pump.fun/{mint_address}",
             # Initialize metrics
             total_holders=1,
@@ -679,12 +677,29 @@ async def helius_webhook(
     """
     Receive Helius webhook events
 
-    This endpoint:
-    1. Validates the webhook (if signature provided)
+    Auth policy: When HELIUS_WEBHOOK_SECRET is configured, requests must
+    include an Authorization header whose value exactly matches the secret
+    (bearer-token style as sent by Helius, compared in constant time).
+    When the secret is unset, requests are accepted unauthenticated and a
+    warning is logged — this preserves dev/test workflows.
+
+    Pipeline:
+    1. Authorization check (above)
     2. Stores raw event immediately
     3. Returns 200 OK fast
     4. Processes event in background
     """
+    # Verify Helius webhook authorization (bearer-token in Authorization header)
+    expected_secret = settings.HELIUS_WEBHOOK_SECRET
+    if not expected_secret:
+        print("⚠️  HELIUS_WEBHOOK_SECRET not configured, accepting unsigned requests")
+    else:
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header:
+            raise HTTPException(status_code=401, detail={"error": "missing authorization"})
+        if not secrets.compare_digest(auth_header, expected_secret):
+            raise HTTPException(status_code=401, detail={"error": "invalid authorization"})
+
     try:
         # Get raw body for signature verification
         body = await request.body()
@@ -997,7 +1012,6 @@ async def recalculate_all_scores(
             token.explainability_data = scores['explainability_data']
 
             # Update tier based on new age
-            # TODO(phase-1): tier_level column not on TokenSignal model yet — add in migration
             token.tier_level = HeliusWebhookProcessor._determine_tier(token.age_minutes or 0)
 
             updated_count += 1

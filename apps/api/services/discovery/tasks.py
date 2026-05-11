@@ -329,12 +329,10 @@ def track_new_token(self, mint_address: str):
             has_graduated=metadata.get("complete", False) if metadata else False,
             market_cap=metadata.get("market_cap") if metadata else None,
             token_metadata=metadata,
-            # TODO(phase-1): tier_level column not on TokenSignal model yet — add in migration
             tier_level="ultra",
             scan_timestamp=datetime.now(timezone.utc),
             pair_created_at=datetime.now(timezone.utc),
             age_minutes=0.0,
-            # TODO(phase-1): pump_fun_url column not on TokenSignal model yet — add in migration
             pump_fun_url=f"https://pump.fun/{mint_address}",
             total_holders=1,
             entity_adjusted_buyers=1,
