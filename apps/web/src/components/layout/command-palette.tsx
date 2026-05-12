@@ -30,6 +30,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
+    // Reset search when palette closes. Tolerated setState-in-effect: the
+    // alternative (key-based remount from parent) is broader churn than this
+    // pre-existing pattern justifies. Revisit if perf becomes a concern.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!open) setSearch("");
   }, [open]);
 
