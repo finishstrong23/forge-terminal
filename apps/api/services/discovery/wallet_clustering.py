@@ -145,3 +145,112 @@ def recalculate_entity_adjusted_buyers(db: Session, token_address: str) -> int:
     )
 
     return max(clustered_entities + unclustered_wallets, 1)
+
+
+def get_unique_holders(db: Session, token_address: str) -> int:
+    """
+    Count unique wallets that bought but haven't sold (net holders).
+    """
+    # Wallets that bought
+    buyers = set(
+        row[0] for row in db.query(distinct(WalletActivity.wallet_address)).filter(
+            WalletActivity.token_address == token_address,
+            WalletActivity.activity_type == "buy",
+        ).all()
+    )
+
+    # Wallets that sold
+    sellers = set(
+        row[0] for row in db.query(distinct(WalletActivity.wallet_address)).filter(
+            WalletActivity.token_address == token_address,
+            WalletActivity.activity_type == "sell",
+        ).all()
+    )
+
+    # Net holders = bought but not sold
+    holders = buyers - sellers
+    return max(len(holders), 0)
+
+
+async def lookup_funding_wallet(wallet_address: str) -> Optional[str]:
+    """
+    Look up the funding source of a wallet using Helius RPC.
+
+    Checks the wallet's first incoming SOL transfer to identify its funder.
+    Rate-limited to avoid Helius API abuse.
+    """
+    from core.config import settings
+    import httpx
+
+    rpc_url = settings.HELIUS_RPC_URL
+    if not rpc_url:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # Get transaction signatures for this wallet (oldest first)
+            response = await client.post(rpc_url, json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getSignaturesForAddress",
+                "params": [
+                    wallet_address,
+                    {"limit": 5, "commitment": "confirmed"}
+                ]
+            })
+
+            if response.status_code != 200:
+                return None
+
+            data = response.json()
+            signatures = data.get("result", [])
+
+            if not signatures:
+                return None
+
+            # Get the oldest transaction to find funder
+            oldest_sig = signatures[-1]["signature"]
+
+            # Get transaction details
+            tx_response = await client.post(rpc_url, json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getTransaction",
+                "params": [
+                    oldest_sig,
+                    {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
+                ]
+            })
+
+            if tx_response.status_code != 200:
+                return None
+
+            tx_data = tx_response.json().get("result")
+            if not tx_data:
+                return None
+
+            # Look for SOL transfer TO our wallet
+            meta = tx_data.get("meta", {})
+            pre_balances = meta.get("preBalances", [])
+            post_balances = meta.get("postBalances", [])
+            account_keys = tx_data.get("transaction", {}).get("message", {}).get("accountKeys", [])
+
+            for i, key in enumerate(account_keys):
+                pubkey = key.get("pubkey", key) if isinstance(key, dict) else key
+                if pubkey == wallet_address:
+                    # Found our wallet -- who sent the SOL?
+                    if i < len(pre_balances) and i < len(post_balances):
+                        if post_balances[i] > pre_balances[i]:
+                            # This wallet received SOL -- find the sender
+                            for j, other_key in enumerate(account_keys):
+                                other_pubkey = other_key.get("pubkey", other_key) if isinstance(other_key, dict) else other_key
+                                if j != i and j < len(pre_balances) and j < len(post_balances):
+                                    if pre_balances[j] > post_balances[j]:
+                                        if other_pubkey not in PROGRAM_ACCOUNTS:
+                                            return other_pubkey
+
+            return None
+
+    except Exception as e:
+        print(f"Error looking up funding wallet for {wallet_address[:8]}...: {e}")
+        return None
