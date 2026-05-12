@@ -1,9 +1,14 @@
+import logging
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, or_
 
 from core.database import get_db
 from models.token import TokenSignal
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -18,10 +23,14 @@ def get_latest_signals(
     hide_honeypots: bool = Query(True),
     db: Session = Depends(get_db),
 ):
-    query = db.query(TokenSignal)
+    # Filter out partially-scored tokens; same policy as /discovery/feed.
+    query = db.query(TokenSignal).filter(
+        TokenSignal.momentum_score.isnot(None),
+        TokenSignal.rug_risk_score.isnot(None),
+    )
 
     if hide_honeypots:
-        query = query.filter(TokenSignal.is_honeypot == False)
+        query = query.filter(TokenSignal.is_honeypot.is_(False))
     if min_momentum > 0:
         query = query.filter(TokenSignal.momentum_score >= min_momentum)
     if max_rug_risk < 100:
@@ -35,6 +44,28 @@ def get_latest_signals(
         .offset((page - 1) * per_page)
         .limit(per_page)
         .all()
+    )
+
+    # Observability: count tokens dropped by the null-score filter in the
+    # last hour. Bounded to avoid a full table scan on every request as the
+    # tokens table grows.
+    # TODO(scaling): sample (1 in N requests) or move to periodic Celery task if traffic grows.
+    # Per-request COUNT becomes a hot-path cost on large tables.
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    filtered_out = (
+        db.query(TokenSignal)
+        .filter(
+            TokenSignal.scan_timestamp > one_hour_ago,
+            or_(
+                TokenSignal.momentum_score.is_(None),
+                TokenSignal.rug_risk_score.is_(None),
+            ),
+        )
+        .count()
+    )
+    logger.info(
+        "signals/latest: returned=%d total_matching=%d filtered_out=%d (last 1h) page=%d per_page=%d",
+        len(signals), total, filtered_out, page, per_page,
     )
 
     return {
