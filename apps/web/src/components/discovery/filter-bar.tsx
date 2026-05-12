@@ -19,9 +19,10 @@ interface FilterBarProps {
   onChange: (filters: FilterState) => void;
   onRefresh: () => void;
   lastUpdated: Date | null;
+  refreshing?: boolean;
 }
 
-export function FilterBar({ filters, onChange, onRefresh, lastUpdated }: FilterBarProps) {
+export function FilterBar({ filters, onChange, onRefresh, lastUpdated, refreshing }: FilterBarProps) {
   const update = (patch: Partial<FilterState>) =>
     onChange({ ...filters, ...patch });
 
@@ -95,8 +96,14 @@ export function FilterBar({ filters, onChange, onRefresh, lastUpdated }: FilterB
             Updated {lastUpdated.toLocaleTimeString()}
           </span>
         )}
-        <Button variant="ghost" size="sm" onClick={onRefresh} className="h-8 gap-1 text-xs">
-          <RotateCw className="h-3 w-3" />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="h-8 gap-1 text-xs"
+        >
+          <RotateCw className={refreshing ? "h-3 w-3 animate-spin" : "h-3 w-3"} />
           Refresh
         </Button>
       </div>
