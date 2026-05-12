@@ -19,6 +19,7 @@ from typing import Dict, List, Optional
 import json
 import hashlib
 import hmac
+import logging
 import secrets
 import httpx
 import asyncio
@@ -27,6 +28,8 @@ from core.database import get_db
 from models.token import HeliusEvent, TokenSignal
 from services.discovery.scoring_engine import score_token, scorer
 from core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Pump.fun API endpoint for token metadata
 PUMP_FUN_API = "https://frontend-api.pump.fun/coins"
@@ -341,6 +344,17 @@ class HeliusWebhookProcessor:
                 cache.delete("stats:overview")
             except Exception:
                 pass  # Cache invalidation is non-critical
+
+            # Broadcast scored token to WebSocket clients (cross-process via Redis pub/sub).
+            # TODO(scaling): move broadcast to separate task if worker throughput becomes an issue.
+            try:
+                from core.pubsub import publish_token_update
+                publish_token_update(signal)
+            except Exception as exc:
+                logger.warning(
+                    "broadcast failed for token %s (%s): %s",
+                    signal.symbol, signal.token_address, exc,
+                )
 
             # Check if this signal should trigger alerts
             try:
