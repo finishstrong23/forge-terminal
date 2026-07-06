@@ -274,6 +274,30 @@ def aggregate_metric_snapshots():
         db.close()
 
 
+# ==================== COPY INTELLIGENCE ====================
+
+@celery_app.task(name="tasks.score_wallets")
+def score_wallets():
+    """
+    Periodic task: persist wallet aggregates + WalletScore snapshots for the
+    copy-intelligence leaderboard (30d window).
+    Runs every 15 minutes via Celery Beat.
+    """
+    from services.copy.wallet_scoring import score_and_persist_wallets
+
+    db = _get_db()
+    try:
+        result = score_and_persist_wallets(db)
+        db.commit()
+        return {"status": "completed", **result}
+    except Exception as exc:
+        db.rollback()
+        print(f"Failed to score wallets: {exc}")
+        return {"status": "error", "error": str(exc)}
+    finally:
+        db.close()
+
+
 # ==================== TOKEN DISCOVERY ====================
 
 @celery_app.task(name="tasks.discover_new_tokens")

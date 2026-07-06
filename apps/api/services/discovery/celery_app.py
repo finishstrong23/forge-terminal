@@ -63,6 +63,10 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.discover_new_tokens",
         "schedule": 60.0,  # every 60 seconds
     },
+    "score-wallets-15m": {
+        "task": "tasks.score_wallets",
+        "schedule": 900.0,  # every 15 minutes
+    },
     "send-email-digest-hourly": {
         "task": "tasks.send_email_digest",
         "schedule": 3600.0,  # every hour
