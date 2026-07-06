@@ -9,9 +9,9 @@ timestamps so results can be Redis-cached as JSON; these models validate and
 type the wire format on the way out.
 """
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WalletStats(BaseModel):
@@ -79,4 +79,47 @@ class ScoreHistoryResponse(BaseModel):
     """Envelope for GET /api/v1/copy/wallets/{address}/score-history."""
     wallet_address: str
     snapshots: List[ScoreSnapshot]
+    count: int
+
+
+class CopySubscriptionCreate(BaseModel):
+    """
+    Follow a wallet. v1 allows shadow mode only — trades are recorded, not
+    executed. Live copy execution lands with the Phase 3 execution layer.
+    """
+    wallet_address: str = Field(min_length=1)
+    mode: Literal["shadow"] = "shadow"
+    max_position_usd: Optional[float] = Field(None, gt=0)
+    daily_loss_cap_usd: Optional[float] = Field(None, gt=0)
+    slippage_tolerance: Optional[float] = Field(None, ge=0, le=1)
+    min_sustainability_score: Optional[float] = Field(None, ge=0, le=100)
+    token_blacklist: Optional[List[str]] = None
+
+
+class CopySubscriptionAction(BaseModel):
+    """PATCH body for state transitions."""
+    action: Literal["pause", "resume", "stop"]
+
+
+class CopySubscriptionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    wallet_address: str
+    mode: str
+    status: str
+    max_position_usd: Optional[float] = None
+    daily_loss_cap_usd: Optional[float] = None
+    slippage_tolerance: Optional[float] = None
+    min_sustainability_score: Optional[float] = None
+    token_blacklist: Optional[List[str]] = None
+    started_at: Optional[datetime] = None
+    paused_at: Optional[datetime] = None
+    stopped_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class CopySubscriptionListResponse(BaseModel):
+    """Envelope for GET /api/v1/copy/subscriptions."""
+    subscriptions: List[CopySubscriptionResponse]
     count: int

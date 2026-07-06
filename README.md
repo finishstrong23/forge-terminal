@@ -81,6 +81,6 @@ npx playwright test
 | Module | Status | Description |
 |---|---|---|
 | Discovery | Phase 1 (live) | Multi-DEX token scanner with dual scoring |
-| Copy Intelligence | Phase 2 (leaderboards live) | Wallet leaderboards + copy trading |
+| Copy Intelligence | Phase 2 (leaderboards + shadow follow live) | Wallet leaderboards + copy trading |
 | Execution Layer | Phase 3 | Jupiter-routed swaps with MEV protection |
 | Subscriptions | Phase 4 | Tiered billing via Stripe |
