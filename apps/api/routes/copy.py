@@ -1,8 +1,9 @@
 """
 Copy Intelligence REST endpoints (Phase 2, v1).
 
-GET /api/v1/copy/leaderboard        — ranked wallet leaderboard over a window
-GET /api/v1/copy/wallets/{address}  — one wallet's stats + recent trade history
+GET /api/v1/copy/leaderboard                        — ranked wallet leaderboard over a window
+GET /api/v1/copy/wallets/{address}                  — one wallet's stats + recent trade history
+GET /api/v1/copy/wallets/{address}/score-history    — persisted WalletScore snapshots
 
 Both aggregate WalletActivity rows recorded by the discovery webhook pipeline.
 The leaderboard runs a double GROUP BY over wallet_activities, so responses
@@ -17,7 +18,13 @@ from sqlalchemy.orm import Session
 
 from core.database import get_db
 from core.redis_cache import cache
-from schemas.copy import LeaderboardResponse, WalletDetailResponse
+from models.wallet import WalletScore
+from schemas.copy import (
+    LeaderboardResponse,
+    ScoreHistoryResponse,
+    ScoreSnapshot,
+    WalletDetailResponse,
+)
 from services.copy.leaderboard import compute_leaderboard, compute_wallet_detail
 
 logger = logging.getLogger(__name__)
@@ -86,4 +93,51 @@ def get_wallet_detail(
         wallet=result["wallet"],
         window=window,
         recent_activity=result["recent_activity"],
+    )
+
+
+@router.get(
+    "/wallets/{wallet_address}/score-history", response_model=ScoreHistoryResponse
+)
+def get_wallet_score_history(
+    wallet_address: str,
+    limit: int = Query(
+        96,
+        ge=1,
+        le=500,
+        description="Max snapshots to return (96 = 24h at the 15-min beat cadence).",
+    ),
+    db: Session = Depends(get_db),
+) -> ScoreHistoryResponse:
+    """
+    Chronological WalletScore snapshots for one wallet, oldest first.
+
+    Returns an empty list (not 404) for wallets with no snapshots yet — a
+    wallet can appear on the live leaderboard before the first beat run
+    persists a score for it.
+    """
+    rows = (
+        db.query(WalletScore)
+        .filter(WalletScore.wallet_address == wallet_address)
+        .order_by(WalletScore.scored_at.desc())
+        .limit(limit)
+        .all()
+    )
+    rows.reverse()  # oldest first for charting
+    snapshots = [
+        ScoreSnapshot(
+            scored_at=s.scored_at,
+            total_score=s.total_score,
+            grade=s.grade,
+            persistence_score=s.persistence_score,
+            win_rate_score=s.win_rate_score,
+            hold_pattern_score=s.hold_pattern_score,
+            insider_penalty=s.insider_penalty,
+        )
+        for s in rows
+    ]
+    return ScoreHistoryResponse(
+        wallet_address=wallet_address,
+        snapshots=snapshots,
+        count=len(snapshots),
     )

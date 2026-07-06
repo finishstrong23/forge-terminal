@@ -92,3 +92,19 @@ export interface ApiWalletDetailResponse {
   window: string;
   recent_activity: ApiWalletActivityItem[];
 }
+
+export interface ApiScoreSnapshot {
+  scored_at: string; // ISO 8601 datetime
+  total_score: number | null;
+  grade: string | null;
+  persistence_score: number | null;
+  win_rate_score: number | null;
+  hold_pattern_score: number | null;
+  insider_penalty: number | null;
+}
+
+export interface ApiScoreHistoryResponse {
+  wallet_address: string;
+  snapshots: ApiScoreSnapshot[];
+  count: number;
+}

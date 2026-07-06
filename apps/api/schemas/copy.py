@@ -62,3 +62,21 @@ class WalletDetailResponse(BaseModel):
     wallet: WalletStats
     window: str
     recent_activity: List[WalletActivityItem]
+
+
+class ScoreSnapshot(BaseModel):
+    """One persisted WalletScore row (written by tasks.score_wallets)."""
+    scored_at: datetime
+    total_score: Optional[float] = None
+    grade: Optional[str] = None
+    persistence_score: Optional[float] = None
+    win_rate_score: Optional[float] = None
+    hold_pattern_score: Optional[float] = None
+    insider_penalty: Optional[float] = None
+
+
+class ScoreHistoryResponse(BaseModel):
+    """Envelope for GET /api/v1/copy/wallets/{address}/score-history."""
+    wallet_address: str
+    snapshots: List[ScoreSnapshot]
+    count: int

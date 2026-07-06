@@ -28,6 +28,17 @@ async function mockWalletDetail(page: Page, body: unknown) {
   );
 }
 
+/** Register AFTER mockWalletDetail — later routes take precedence in Playwright. */
+async function mockScoreHistory(page: Page, body: unknown) {
+  await page.route("**/api/v1/copy/wallets/**/score-history*", (route: Route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
 const truncate = (addr: string, chars: number) =>
   `${addr.slice(0, chars)}...${addr.slice(-chars)}`;
 
@@ -67,6 +78,22 @@ const entryB = {
 
 const twoWalletBody = { entries: [entryA, entryB], count: 2, has_more: false, window: "24h" };
 const emptyBody = { entries: [], count: 0, has_more: false, window: "24h" };
+
+const historyBody = {
+  wallet_address: WALLET_A,
+  count: 3,
+  snapshots: [72.1, 74.8, 78.2].map((score, i) => ({
+    scored_at: new Date(Date.now() - (3 - i) * 15 * 60_000).toISOString(),
+    total_score: score,
+    grade: "A",
+    persistence_score: 40 + i,
+    win_rate_score: 75,
+    hold_pattern_score: 90,
+    insider_penalty: 0,
+  })),
+};
+
+const emptyHistoryBody = { wallet_address: WALLET_A, count: 0, snapshots: [] };
 
 const detailBody = {
   wallet: entryA,
@@ -153,6 +180,7 @@ test.describe("Copy Intelligence Page", () => {
   test("clicking a row opens the wallet detail panel", async ({ page }) => {
     await mockLeaderboard(page, twoWalletBody);
     await mockWalletDetail(page, detailBody);
+    await mockScoreHistory(page, historyBody);
     await page.goto("/copy");
 
     await page
@@ -167,9 +195,43 @@ test.describe("Copy Intelligence Page", () => {
     await expect(page.getByText("TOK1", { exact: true })).toBeVisible();
   });
 
+  test("detail panel shows the score trend sparkline", async ({ page }) => {
+    await mockLeaderboard(page, twoWalletBody);
+    await mockWalletDetail(page, detailBody);
+    await mockScoreHistory(page, historyBody);
+    await page.goto("/copy");
+
+    await page
+      .getByRole("table")
+      .getByText(truncate(WALLET_A, 5), { exact: true })
+      .click();
+
+    await expect(page.getByText("Score trend")).toBeVisible();
+    await expect(page.getByText("3 snapshots", { exact: false })).toBeVisible();
+    await expect(
+      page.getByRole("img", { name: /Sustainability score trend/ }),
+    ).toBeVisible();
+  });
+
+  test("score trend section is hidden without snapshots", async ({ page }) => {
+    await mockLeaderboard(page, twoWalletBody);
+    await mockWalletDetail(page, detailBody);
+    await mockScoreHistory(page, emptyHistoryBody);
+    await page.goto("/copy");
+
+    await page
+      .getByRole("table")
+      .getByText(truncate(WALLET_A, 5), { exact: true })
+      .click();
+
+    await expect(page.getByText("Recent activity")).toBeVisible();
+    await expect(page.getByText("Score trend")).not.toBeVisible();
+  });
+
   test("detail panel can be closed", async ({ page }) => {
     await mockLeaderboard(page, twoWalletBody);
     await mockWalletDetail(page, detailBody);
+    await mockScoreHistory(page, emptyHistoryBody);
     await page.goto("/copy");
 
     await page

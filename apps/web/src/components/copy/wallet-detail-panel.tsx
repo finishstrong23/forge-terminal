@@ -8,12 +8,14 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn, truncateAddress, scoreColor, scoreBg } from "@/lib/utils";
 import {
+  fetchScoreHistory,
   fetchWalletDetail,
   formatRelativeTime,
   formatSol,
   type LeaderboardWindow,
 } from "@/lib/copy-leaderboard";
-import type { ApiWalletDetailResponse } from "@/lib/types";
+import { ScoreSparkline } from "@/components/copy/score-sparkline";
+import type { ApiScoreSnapshot, ApiWalletDetailResponse } from "@/lib/types";
 
 interface WalletDetailPanelProps {
   walletAddress: string;
@@ -50,6 +52,7 @@ export function WalletDetailPanel({
 }: WalletDetailPanelProps) {
   const [detail, setDetail] = useState<ApiWalletDetailResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<ApiScoreSnapshot[]>([]);
 
   useEffect(() => {
     let unmounted = false;
@@ -66,6 +69,24 @@ export function WalletDetailPanel({
       unmounted = true;
     };
   }, [walletAddress, window]);
+
+  // Score history is supplementary — failures just hide the trend section.
+  useEffect(() => {
+    let unmounted = false;
+    setHistory([]);
+    fetchScoreHistory(walletAddress)
+      .then((h) => {
+        if (!unmounted) setHistory(Array.isArray(h.snapshots) ? h.snapshots : []);
+      })
+      .catch(() => {
+        /* section stays hidden */
+      });
+    return () => {
+      unmounted = true;
+    };
+  }, [walletAddress]);
+
+  const scoredSnapshots = history.filter((s) => s.total_score !== null);
 
   const stats = detail?.wallet;
 
@@ -186,6 +207,21 @@ export function WalletDetailPanel({
               <Badge variant="warning" className="text-[10px]">
                 Linked to a funding cluster — possible insider activity
               </Badge>
+            )}
+
+            {scoredSnapshots.length >= 2 && (
+              <div>
+                <div className="mb-1 flex items-baseline justify-between">
+                  <h4 className="text-xs font-semibold text-foreground">
+                    Score trend
+                  </h4>
+                  <span className="text-[10px] text-muted-foreground">
+                    {scoredSnapshots.length} snapshots · since{" "}
+                    {formatRelativeTime(scoredSnapshots[0].scored_at)}
+                  </span>
+                </div>
+                <ScoreSparkline snapshots={scoredSnapshots} />
+              </div>
             )}
 
             <Separator />

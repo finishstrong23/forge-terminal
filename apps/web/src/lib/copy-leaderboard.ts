@@ -15,6 +15,7 @@ import { apiUrl } from "./api";
 import type {
   ApiLeaderboardEntry,
   ApiLeaderboardResponse,
+  ApiScoreHistoryResponse,
   ApiWalletDetailResponse,
 } from "./types";
 
@@ -121,6 +122,25 @@ export async function fetchWalletDetail(
     throw new Error(`wallet detail fetch failed: HTTP ${response.status}`);
   }
   return (await response.json()) as ApiWalletDetailResponse;
+}
+
+/**
+ * Fetch persisted score snapshots (oldest first). Throws on non-2xx/network
+ * errors. An empty snapshot list is a normal response for wallets the beat
+ * task hasn't scored yet.
+ */
+export async function fetchScoreHistory(
+  walletAddress: string,
+  limit = 96,
+): Promise<ApiScoreHistoryResponse> {
+  const url = apiUrl(
+    `/api/v1/copy/wallets/${encodeURIComponent(walletAddress)}/score-history?limit=${limit}`,
+  );
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`score history fetch failed: HTTP ${response.status}`);
+  }
+  return (await response.json()) as ApiScoreHistoryResponse;
 }
 
 /** "3m ago" / "2.1h ago" / "1.2d ago" — or an em dash for null. */
