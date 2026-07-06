@@ -4,10 +4,12 @@ Copy-subscription REST endpoints (Phase 2 — shadow mode only).
 POST  /api/v1/copy/subscriptions        — follow a wallet (shadow mode)
 GET   /api/v1/copy/subscriptions        — list the caller's subscriptions
 PATCH /api/v1/copy/subscriptions/{id}   — pause / resume / stop
+GET   /api/v1/copy/trades               — the caller's shadow-trade ledger
 
 All routes require a Bearer token (routes.auth.get_current_user). Shadow
-mode records what copy-execution WOULD do; actual Jupiter-routed execution
-is the Phase 3 layer, at which point mode="live" unlocks.
+mode records what copy-execution WOULD do (services/copy/shadow_recorder.py
+on the beat schedule); actual Jupiter-routed execution is the Phase 3
+layer, at which point mode="live" unlocks.
 
 Status state machine:
     active --pause--> paused --resume--> active
@@ -21,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from core.database import get_db
-from models.trade import CopySubscription
+from models.trade import CopySubscription, ExecutedTrade
 from models.user import User
 from models.wallet import WalletActivity
 from routes.auth import get_current_user
@@ -30,14 +32,16 @@ from schemas.copy import (
     CopySubscriptionCreate,
     CopySubscriptionListResponse,
     CopySubscriptionResponse,
+    ShadowTradeListResponse,
+    ShadowTradeResponse,
 )
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/copy/subscriptions")
+router = APIRouter(prefix="/api/v1/copy")
 
 
-@router.post("", response_model=CopySubscriptionResponse, status_code=201)
+@router.post("/subscriptions", response_model=CopySubscriptionResponse, status_code=201)
 def create_subscription(
     body: CopySubscriptionCreate,
     db: Session = Depends(get_db),
@@ -93,7 +97,7 @@ def create_subscription(
     return CopySubscriptionResponse.model_validate(sub)
 
 
-@router.get("", response_model=CopySubscriptionListResponse)
+@router.get("/subscriptions", response_model=CopySubscriptionListResponse)
 def list_subscriptions(
     status: Optional[Literal["active", "paused", "stopped"]] = Query(
         None, description="Filter by status; omit for all."
@@ -113,7 +117,7 @@ def list_subscriptions(
     )
 
 
-@router.patch("/{subscription_id}", response_model=CopySubscriptionResponse)
+@router.patch("/subscriptions/{subscription_id}", response_model=CopySubscriptionResponse)
 def update_subscription(
     subscription_id: str,
     body: CopySubscriptionAction,
@@ -154,3 +158,31 @@ def update_subscription(
     db.commit()
     db.refresh(sub)
     return CopySubscriptionResponse.model_validate(sub)
+
+
+@router.get("/trades", response_model=ShadowTradeListResponse)
+def list_shadow_trades(
+    status: Optional[Literal["simulated", "skipped"]] = Query(
+        None, description="Filter by status; omit for all."
+    ),
+    subscription_id: Optional[str] = Query(
+        None, description="Only trades from one subscription."
+    ),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ShadowTradeListResponse:
+    """The caller's shadow-trade ledger, newest first."""
+    query = db.query(ExecutedTrade).filter(
+        ExecutedTrade.user_id == current_user.id,
+        ExecutedTrade.source == "copy_shadow",
+    )
+    if status is not None:
+        query = query.filter(ExecutedTrade.status == status)
+    if subscription_id is not None:
+        query = query.filter(ExecutedTrade.copy_subscription_id == subscription_id)
+    trades = query.order_by(ExecutedTrade.created_at.desc()).limit(limit).all()
+    return ShadowTradeListResponse(
+        trades=[ShadowTradeResponse.model_validate(t) for t in trades],
+        count=len(trades),
+    )

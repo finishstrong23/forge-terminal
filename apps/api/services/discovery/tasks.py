@@ -298,6 +298,29 @@ def score_wallets():
         db.close()
 
 
+@celery_app.task(name="tasks.record_shadow_trades")
+def record_shadow_trades():
+    """
+    Periodic task: append shadow ExecutedTrade rows for active copy
+    subscriptions from recent WalletActivity.
+    Runs every 60 seconds via Celery Beat (15-min rescan window; the unique
+    shadow signature makes reruns idempotent).
+    """
+    from services.copy.shadow_recorder import record_shadow_trades as _record
+
+    db = _get_db()
+    try:
+        result = _record(db)
+        db.commit()
+        return {"status": "completed", **result}
+    except Exception as exc:
+        db.rollback()
+        print(f"Failed to record shadow trades: {exc}")
+        return {"status": "error", "error": str(exc)}
+    finally:
+        db.close()
+
+
 # ==================== TOKEN DISCOVERY ====================
 
 @celery_app.task(name="tasks.discover_new_tokens")

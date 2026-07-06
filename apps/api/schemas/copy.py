@@ -123,3 +123,28 @@ class CopySubscriptionListResponse(BaseModel):
     """Envelope for GET /api/v1/copy/subscriptions."""
     subscriptions: List[CopySubscriptionResponse]
     count: int
+
+
+class ShadowTradeResponse(BaseModel):
+    """One row of the caller's shadow-trade ledger (ExecutedTrade)."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    token_address: str
+    trade_type: str
+    source: str
+    sol_amount: Optional[float] = None
+    price_at_trade: Optional[float] = None
+    status: str
+    error_message: Optional[str] = None
+    copy_subscription_id: Optional[str] = None
+    rug_risk_at_trade: Optional[float] = None
+    momentum_at_trade: Optional[float] = None
+    executed_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class ShadowTradeListResponse(BaseModel):
+    """Envelope for GET /api/v1/copy/trades."""
+    trades: List[ShadowTradeResponse]
+    count: int
