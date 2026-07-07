@@ -189,8 +189,10 @@ within its caps, and stops itself when the daily loss cap is hit.
 - **Known small debt:** ✅ ESLint fixed (flat config, `npm run lint` works
   and gates CI); ✅ pydantic deprecation warning resolved; multi-DEX
   `source_dex` still hardcoded (`TODO(task-2)`).
-- **Legal/product:** trading-risk disclaimers, ToS + privacy policy,
-  jurisdiction gating decision, pricing page, onboarding flow, docs.
+- **Legal/product:** ✅ drafted — /terms, /privacy, /disclaimer pages with
+  signup agreement + Execute-page risk link. These are TEMPLATES and
+  **must be reviewed by qualified counsel before public launch**. Still
+  open: jurisdiction gating decision, pricing page, onboarding flow, docs.
 
 ---
 
