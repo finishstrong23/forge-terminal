@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 import sentry_sdk
@@ -22,7 +23,13 @@ from services.discovery.webhook_handler import router as webhook_router
 logger = logging.getLogger(__name__)
 
 if settings.SENTRY_DSN:
-    sentry_sdk.init(dsn=settings.SENTRY_DSN, traces_sample_rate=0.1)
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        traces_sample_rate=0.1,
+        # Railway injects the deploy SHA; release tagging groups errors by deploy.
+        release=os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA"),
+        environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
+    )
 
 
 @asynccontextmanager
