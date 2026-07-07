@@ -25,7 +25,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run dev",
+    // CI builds first (see .github/workflows/ci.yml), so serve the
+    // production build there; locally, dev mode with hot reload.
+    command: process.env.CI ? "npm run start" : "npm run dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 30000,

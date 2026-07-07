@@ -43,6 +43,14 @@ alembic upgrade head        # Run migrations
 uvicorn main:app --reload   # http://localhost:8000
 ```
 
+### Backend Tests
+
+```bash
+cd apps/api
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest
+```
+
 ### E2E Tests
 
 ```bash
@@ -50,6 +58,8 @@ cd apps/web
 npx playwright install chromium
 npx playwright test
 ```
+
+CI (GitHub Actions) runs both suites on every PR and push to `main`.
 
 ## Environment Variables
 
