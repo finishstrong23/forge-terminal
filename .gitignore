@@ -41,6 +41,10 @@ npm-debug.log*
 .vscode-test
 *.tsbuildinfo
 
+# Playwright
+test-results/
+playwright-report/
+
 # Cache
 .cache/
 .parcel-cache

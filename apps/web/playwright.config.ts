@@ -14,11 +14,20 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        // Sandboxed/CI environments can point at a system Chromium instead
+        // of the version-pinned download (e.g. /opt/pw-browsers/chromium).
+        ...(process.env.PLAYWRIGHT_CHROMIUM_PATH
+          ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } }
+          : {}),
+      },
     },
   ],
   webServer: {
-    command: "npm run dev",
+    // CI builds first (see .github/workflows/ci.yml), so serve the
+    // production build there; locally, dev mode with hot reload.
+    command: process.env.CI ? "npm run start" : "npm run dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 30000,
