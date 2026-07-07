@@ -13,6 +13,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 JUPITER_QUOTE_URL = "https://quote-api.jup.ag/v6/quote"
+JUPITER_SWAP_URL = "https://quote-api.jup.ag/v6/swap"
 HTTP_TIMEOUT_S = 8.0
 
 
@@ -47,3 +48,34 @@ def get_quote(
     if not isinstance(quote, dict) or "outAmount" not in quote:
         raise JupiterUnavailable("Jupiter returned an unexpected quote payload")
     return quote
+
+
+def get_swap_transaction(
+    quote_response: Dict[str, Any],
+    user_public_key: str,
+    priority_fee_lamports: int = 0,
+) -> Dict[str, Any]:
+    """
+    Build an unsigned swap transaction from a full quote payload. The
+    server never sees a private key — the returned base64 transaction is
+    signed client-side by the user's wallet.
+    """
+    body: Dict[str, Any] = {
+        "quoteResponse": quote_response,
+        "userPublicKey": user_public_key,
+        "wrapAndUnwrapSol": True,
+        "dynamicComputeUnitLimit": True,
+    }
+    if priority_fee_lamports > 0:
+        body["prioritizationFeeLamports"] = priority_fee_lamports
+    try:
+        response = httpx.post(JUPITER_SWAP_URL, json=body, timeout=HTTP_TIMEOUT_S)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        logger.warning("jupiter: swap build failed: %s", exc)
+        raise JupiterUnavailable(f"Jupiter swap unavailable: {exc}") from exc
+
+    if not isinstance(payload, dict) or "swapTransaction" not in payload:
+        raise JupiterUnavailable("Jupiter returned an unexpected swap payload")
+    return payload

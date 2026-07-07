@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/layout/app-shell";
+import { SolanaProvider } from "@/components/providers/solana-provider";
 import { AuthProvider } from "@/hooks/useAuth";
 
 const geistSans = Geist({
@@ -37,7 +38,9 @@ export default function RootLayout({
     >
       <body className="h-full antialiased">
         <AuthProvider>
-          <AppShell>{children}</AppShell>
+          <SolanaProvider>
+            <AppShell>{children}</AppShell>
+          </SolanaProvider>
         </AuthProvider>
       </body>
     </html>

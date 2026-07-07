@@ -78,7 +78,8 @@ test.describe("Settings", () => {
 
     await page.getByRole("button", { name: "Upgrade — monthly" }).click();
     await expect(page).toHaveURL(/billing=success/);
-    await expect(page.getByText("Payment complete")).toBeVisible();
+    // Full page reload after location.assign — allow for dev-mode hydration.
+    await expect(page.getByText("Payment complete")).toBeVisible({ timeout: 15000 });
   });
 
   test("pro tier shows renewal info and manage billing", async ({ page }) => {

@@ -112,16 +112,22 @@ undelayed signals, and their tier survives webhook-driven renewal/cancel.
 Sequenced to defer the hardest risk (automated custody) while shipping
 visible value early.
 
-- **Wallet connect** (Solana wallet-adapter) — non-custodial.
+- ✅ **Wallet connect** (Solana wallet-adapter, Phantom + wallet-standard
+  autodetect) — non-custodial; set `NEXT_PUBLIC_SOLANA_RPC_URL` in prod
+  (public mainnet RPC is rate-limited).
 - ✅ **SOL/USD price feed**: Jupiter price API + CoinGecko fallback,
   Redis-cached, refreshed by a 60s beat task (heartbeat-monitored),
   `GET /api/v1/execute/price`. `max_position_usd` is now ENFORCED in
   shadow mode (usd_value stamped on ledger rows; cap skips carry a
   reason). Token-level price feed + daily loss cap still pending.
-- **Manual swaps:** Buy button on Discovery/Copy → Jupiter quote (✅
-  quote proxy at `GET /api/v1/execute/quote`, SOL-input v1) → user
-  signs in their own wallet. Swap building, slippage controls, priority
-  fees, optional MEV protection (Jito) pending.
+- ✅ **Manual swaps (buy-side v1):** Execute page swap ticket — live
+  Jupiter quote (price impact, route), slippage presets, swap tx built
+  server-side (`POST /execute/swap-transaction`, keys never leave the
+  wallet), signed + sent client-side, recorded to `ExecutedTrade`
+  (source=manual) via `POST /execute/trades`. Still pending: sell side,
+  Buy buttons on Discovery/Copy rows, priority-fee UI, Jito MEV
+  protection, a confirmation-checker beat task (recorded trades stay
+  "submitted"), and real token decimals on the ticket.
 - Execute page: swap ticket + open positions; Portfolio: real holdings +
   PnL from `ExecutedTrade`.
 - Record executed trades with the risk-context columns already in the
