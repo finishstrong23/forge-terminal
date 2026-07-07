@@ -225,6 +225,7 @@ export default function PortfolioPage() {
                   <th className="px-3 py-2">USD</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Reason</th>
+                  <th className="px-3 py-2"></th>
                 </tr>
               </thead>
               <tbody>
@@ -270,6 +271,24 @@ export default function PortfolioPage() {
                     </td>
                     <td className="max-w-[240px] truncate px-3 py-2 text-xs text-muted-foreground">
                       {t.error_message ?? "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {/* One-tap copy (M4, custody option a): prefill the
+                          Execute ticket; the user's own wallet signs. Buys
+                          only — a sell's size depends on YOUR holdings, and
+                          the ledger's sol_amount is SOL received, not the
+                          token amount the sell ticket expects. */}
+                      {t.status === "simulated" &&
+                        t.trade_type === "buy" &&
+                        t.sol_amount !== null && (
+                          <Button variant="outline" size="sm" className="h-6 text-xs" asChild>
+                            <Link
+                              href={`/execute?mint=${encodeURIComponent(t.token_address)}&side=buy&amount=${t.sol_amount}`}
+                            >
+                              Copy
+                            </Link>
+                          </Button>
+                        )}
                     </td>
                   </tr>
                 ))}

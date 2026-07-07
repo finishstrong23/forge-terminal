@@ -42,10 +42,16 @@ function ExecuteContent() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
 
-  // Buy buttons on Discovery rows land here as /execute?mint=<address>.
+  // Buy buttons on Discovery rows land here as /execute?mint=<address>;
+  // one-tap copy from the shadow ledger adds &side= and &amount=.
   const [outputMint, setOutputMint] = useState(searchParams.get("mint") ?? "");
-  const [side, setSide] = useState<SwapSide>("buy");
-  const [amountSol, setAmountSol] = useState("");
+  const [side, setSide] = useState<SwapSide>(
+    searchParams.get("side") === "sell" ? "sell" : "buy",
+  );
+  const [amountSol, setAmountSol] = useState(() => {
+    const amount = parseFloat(searchParams.get("amount") ?? "");
+    return Number.isFinite(amount) && amount > 0 ? String(amount) : "";
+  });
   const [slippageBps, setSlippageBps] = useState(100);
   const [solPrice, setSolPrice] = useState<number | null>(null);
   const [quote, setQuote] = useState<SwapQuote | null>(null);

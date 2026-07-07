@@ -152,6 +152,12 @@ key management, withdrawal limits, insurance story). Recommendation:
 ship (a) first, evaluate (b); treat (c) as a company decision, not a
 sprint task.
 
+✅ Option (a) v1 shipped: simulated BUY rows in the shadow ledger carry a
+Copy button that prefills the Execute ticket (mint + side + SOL amount);
+the user's wallet signs. Sells are deliberately excluded (sell size
+depends on the copier's own holdings). Fully-automated paths (b)/(c)
+remain open decisions.
+
 - Copy engine: leader trade → risk-filter check (now USD-enforceable via
   M3 price feed) → execution path per custody model → `ExecutedTrade`
   (source="copy") with slippage/fee accounting.
