@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: Optional[str] = None
     STRIPE_PUBLISHABLE_KEY: Optional[str] = None
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
+    STRIPE_PRICE_PRO_MONTHLY: Optional[str] = None
+    STRIPE_PRICE_PRO_YEARLY: Optional[str] = None
+
+    # Base URL of the web app, used for Stripe checkout/portal redirects.
+    FRONTEND_URL: str = "http://localhost:3000"
 
     HELIUS_API_KEY: Optional[str] = None
     HELIUS_WEBHOOK_SECRET: Optional[str] = None
@@ -31,6 +36,8 @@ class Settings(BaseSettings):
     FREE_TIER_MAX_DAILY_SIGNALS: int = 50
     MAX_TOKENS_TRADER: int = 100
     MAX_TOKENS_PRO: int = 500
+    FREE_TIER_MAX_ACTIVE_FOLLOWS: int = 3
+    PRO_TIER_MAX_ACTIVE_FOLLOWS: int = 50
 
     ALERT_MIN_MOMENTUM: float = 60.0
     ALERT_MIN_CONFIDENCE: float = 70.0

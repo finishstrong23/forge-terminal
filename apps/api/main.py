@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.pubsub import subscribe_and_fanout
 from routes.auth import router as auth_router
+from routes.billing import router as billing_router
 from routes.copy import router as copy_router
 from routes.copy_subscriptions import router as copy_subscriptions_router
 from routes.discovery import router as discovery_router
@@ -61,6 +62,7 @@ app.include_router(discovery_router)
 app.include_router(copy_router)
 app.include_router(copy_subscriptions_router)
 app.include_router(auth_router)
+app.include_router(billing_router)
 app.include_router(ws_router)
 app.include_router(webhook_router, prefix="/api/v1")
 

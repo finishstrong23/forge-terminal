@@ -22,6 +22,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from core.database import get_db
 from models.trade import CopySubscription, ExecutedTrade
 from models.user import User
@@ -74,6 +75,30 @@ def create_subscription(
     if duplicate:
         raise HTTPException(
             status_code=409, detail="Already subscribed to this wallet"
+        )
+
+    # Tier-based limit on concurrent follows (active + paused).
+    limit = (
+        settings.FREE_TIER_MAX_ACTIVE_FOLLOWS
+        if current_user.subscription_tier == "free"
+        else settings.PRO_TIER_MAX_ACTIVE_FOLLOWS
+    )
+    open_follows = (
+        db.query(CopySubscription.id)
+        .filter(
+            CopySubscription.user_id == current_user.id,
+            CopySubscription.status != "stopped",
+        )
+        .count()
+    )
+    if open_follows >= limit:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Follow limit reached ({limit} on the "
+                f"{current_user.subscription_tier} tier)"
+                + (" — upgrade for more" if current_user.subscription_tier == "free" else "")
+            ),
         )
 
     sub = CopySubscription(

@@ -13,13 +13,29 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from core.database import get_db
 from models.token import TokenSignal
+from models.user import User
+from routes.auth import get_current_user_optional
 from schemas.discovery import FeedResponse, TokenFeedItem
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/discovery")
+
+
+def free_tier_cutoff(user: Optional[User]) -> Optional[datetime]:
+    """
+    Free/anonymous callers see signals delayed by FREE_TIER_DELAY_MINUTES;
+    paid tiers see realtime. Returns the max scan_timestamp allowed, or
+    None for no restriction.
+    """
+    if user is not None and user.subscription_tier != "free":
+        return None
+    if settings.FREE_TIER_DELAY_MINUTES <= 0:
+        return None
+    return datetime.now(timezone.utc) - timedelta(minutes=settings.FREE_TIER_DELAY_MINUTES)
 
 
 @router.get("/feed", response_model=FeedResponse)
@@ -31,6 +47,7 @@ def get_discovery_feed(
     ),
     hide_honeypots: bool = Query(True, description="Drop tokens flagged as honeypots."),
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ) -> FeedResponse:
     """
     Chronological feed of fully-scored tokens.
@@ -38,6 +55,9 @@ def get_discovery_feed(
     Filters out tokens with NULL momentum_score or rug_risk_score — partial
     scoring runs (e.g. when the metrics aggregation step errors before
     score assignment) should not surface in the feed.
+
+    Free/anonymous callers get signals delayed by FREE_TIER_DELAY_MINUTES;
+    paid tiers see realtime.
 
     Pagination: pass `since=<scan_timestamp of last item from previous page>`
     to fetch older entries. The comparison is strict-greater-than, so adjacent
@@ -47,6 +67,9 @@ def get_discovery_feed(
         TokenSignal.momentum_score.isnot(None),
         TokenSignal.rug_risk_score.isnot(None),
     ]
+    cutoff = free_tier_cutoff(current_user)
+    if cutoff is not None:
+        base_filters.append(TokenSignal.scan_timestamp <= cutoff)
     window_filters = []
     if since is not None:
         window_filters.append(TokenSignal.scan_timestamp > since)

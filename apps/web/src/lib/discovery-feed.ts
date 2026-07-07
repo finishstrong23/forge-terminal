@@ -15,6 +15,7 @@
  */
 import type { TokenSignal } from "@/components/discovery/signal-table";
 import { apiUrl, wsUrl } from "./api";
+import { authHeaders, getToken } from "./auth";
 import type { ApiFeedResponse, ApiTokenFeedItem } from "./types";
 
 /** Maximum number of tokens held in memory client-side. Prune oldest on add. */
@@ -88,7 +89,8 @@ export function normalizeToken(t: ApiTokenFeedItem | null | undefined): TokenSig
  */
 export async function fetchInitialFeed(limit = 50): Promise<TokenSignal[]> {
   const url = apiUrl(`/api/v1/discovery/feed?limit=${limit}`);
-  const response = await fetch(url, { cache: "no-store" });
+  // Tier matters: paid accounts get realtime, free/anonymous a delayed feed.
+  const response = await fetch(url, { cache: "no-store", headers: authHeaders() });
   if (!response.ok) {
     throw new Error(`feed fetch failed: HTTP ${response.status}`);
   }
@@ -125,7 +127,11 @@ export function mergeIncomingToken(
   return prepended;
 }
 
-/** Full WS URL for the discovery channel. */
+/** Full WS URL for the discovery channel (JWT as query param — browsers
+ * can't set an Authorization header on a WebSocket handshake). */
 export function discoveryWsUrl(): string {
-  return wsUrl("/ws/discovery");
+  const token = getToken();
+  return wsUrl(
+    token ? `/ws/discovery?token=${encodeURIComponent(token)}` : "/ws/discovery",
+  );
 }

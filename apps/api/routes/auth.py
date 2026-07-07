@@ -59,6 +59,23 @@ def get_current_user(
     return user
 
 
+def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> Optional[User]:
+    """
+    Like get_current_user, but anonymous/invalid tokens resolve to None
+    instead of 401 — for public endpoints whose behavior varies by tier
+    (e.g. the free-tier feed delay).
+    """
+    if credentials is None:
+        return None
+    user_id = decode_access_token(credentials.credentials)
+    if user_id is None:
+        return None
+    return db.query(User).filter(User.id == user_id).first()
+
+
 def _token_response(user: User) -> TokenResponse:
     return TokenResponse(
         access_token=create_access_token(user.id),

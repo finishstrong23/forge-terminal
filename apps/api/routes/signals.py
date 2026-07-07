@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -7,6 +8,9 @@ from sqlalchemy import desc, or_
 
 from core.database import get_db
 from models.token import TokenSignal
+from models.user import User
+from routes.auth import get_current_user_optional
+from routes.discovery import free_tier_cutoff
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +26,17 @@ def get_latest_signals(
     min_confidence: float = Query(0, ge=0, le=100),
     hide_honeypots: bool = Query(True),
     db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     # Filter out partially-scored tokens; same policy as /discovery/feed.
     query = db.query(TokenSignal).filter(
         TokenSignal.momentum_score.isnot(None),
         TokenSignal.rug_risk_score.isnot(None),
     )
+    # Free/anonymous callers get delayed signals; paid tiers see realtime.
+    cutoff = free_tier_cutoff(current_user)
+    if cutoff is not None:
+        query = query.filter(TokenSignal.scan_timestamp <= cutoff)
 
     if hide_honeypots:
         query = query.filter(TokenSignal.is_honeypot.is_(False))
