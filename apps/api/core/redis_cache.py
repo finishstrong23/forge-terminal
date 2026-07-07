@@ -119,6 +119,24 @@ class RedisCache:
         self.set(key, result, ttl)
         return result
 
+    def rate_limit(self, key: str, max_attempts: int, window_seconds: int) -> bool:
+        """
+        Fixed-window rate limit. Returns True when the attempt is ALLOWED.
+
+        Fail-open: with Redis unavailable or erroring, everything is allowed —
+        an auth endpoint must not lock users out because the limiter's
+        backend is down.
+        """
+        if not self._available or self._client is None:
+            return True
+        try:
+            count = self._client.incr(key)
+            if count == 1:
+                self._client.expire(key, window_seconds)
+            return int(count) <= max_attempts
+        except Exception:
+            return True
+
     def health_check(self) -> dict:
         """Return Redis health status."""
         if not self._available:

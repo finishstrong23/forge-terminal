@@ -123,6 +123,8 @@ function SettingsContent() {
         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
           <span className="text-muted-foreground">Email</span>
           <span className="text-right">{user.email}</span>
+          <span className="text-muted-foreground">Email verified</span>
+          <span className="text-right">{user.email_verified ? "Yes" : "No — check your inbox"}</span>
           <span className="text-muted-foreground">Member since</span>
           <span className="text-right font-mono-numbers">
             {formatRelativeTime(user.created_at)}

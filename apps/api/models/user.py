@@ -10,6 +10,7 @@ class User(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     email = Column(String, unique=True, nullable=False, index=True)
+    email_verified = Column(Boolean, default=False, nullable=False)
     password_hash = Column(String, nullable=False)
     role = Column(String, default="user")
     subscription_tier = Column(String, default="free")
