@@ -85,15 +85,21 @@ see shadow trades appear in their ledger within minutes — in prod.
 Recommended launch point. Discovery + Copy Intelligence (shadow) is a
 sellable product without touching custody/execution risk.
 
-- Stripe products/prices, checkout session, customer portal, webhook
-  handler (models + config already scaffolded).
-- Tier enforcement, which is currently decorative: free-tier signal delay
-  (`FREE_TIER_DELAY_MINUTES`), daily signal cap, WS tier gating
-  (`websocket_manager` already tracks tier), follow-count limits by tier.
+- ✅ Stripe integration: checkout session, customer portal, billing status,
+  signature-verified `/api/v1/webhooks/stripe` syncing tier + Subscription
+  rows through the full lifecycle (checkout → update → downgrade → delete).
+  Gracefully 503s until `STRIPE_SECRET_KEY` / price IDs / webhook secret
+  are configured (create the Product/Prices in the Stripe dashboard).
+- ✅ Tier enforcement: free/anonymous signals delayed
+  `FREE_TIER_DELAY_MINUTES` on both REST endpoints; realtime WS tokens
+  gated to paid tiers (JWT via `?token=`, free sockets fall back to
+  delayed polling); follow limits (3 free / 50 pro). Daily signal cap
+  still pending.
 - Auth hardening that must precede real accounts: per-IP throttling on
   register/login, password reset + email verification (SMTP config +
   alert_service exist), refresh tokens or shorter access-token TTL.
-- Settings page becomes real: account, plan, billing portal link.
+- ✅ Settings page: account, plan with upgrade (checkout) or manage
+  billing (portal), sign out, checkout success/cancel banners.
 
 **Exit test:** a user can upgrade with a real card, immediately sees
 undelayed signals, and their tier survives webhook-driven renewal/cancel.

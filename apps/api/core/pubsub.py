@@ -98,7 +98,11 @@ async def subscribe_and_fanout() -> None:
                     continue
                 envelope = {"type": "token", "data": data}
                 try:
-                    await manager.broadcast(envelope)
+                    # Realtime tokens are a paid-tier feature: free/anonymous
+                    # sockets fall back to the delayed REST poll (see
+                    # routes/discovery.free_tier_cutoff). Tier resolution
+                    # happens at connect time in routes/ws.py.
+                    await manager.send_to_tier("pro", envelope)
                 except Exception as send_err:
                     logger.warning("pubsub: ws broadcast failed: %s", send_err)
                 # Reset backoff after each successful receive+fanout.
