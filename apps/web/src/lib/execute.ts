@@ -1,0 +1,96 @@
+/**
+ * Execution data layer (M3 — non-custodial swaps).
+ * Source of truth: apps/api/routes/execute.py.
+ */
+import { apiUrl } from "./api";
+import { authHeaders } from "./auth";
+
+export interface SwapQuote {
+  input_mint: string;
+  output_mint: string;
+  in_amount: string | null;
+  out_amount: string | null;
+  other_amount_threshold: string | null;
+  price_impact_pct: string | null;
+  slippage_bps: number;
+  route_labels: (string | null)[];
+  quote_response?: Record<string, unknown>;
+}
+
+async function parseOrThrow<T>(response: Response, what: string): Promise<T> {
+  if (!response.ok) {
+    let detail = `${what} failed: HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(detail);
+  }
+  return (await response.json()) as T;
+}
+
+export async function fetchSolPrice(): Promise<number> {
+  const response = await fetch(apiUrl("/api/v1/execute/price"), { cache: "no-store" });
+  const body = await parseOrThrow<{ sol_usd: number }>(response, "price");
+  return body.sol_usd;
+}
+
+export async function fetchQuote(
+  outputMint: string,
+  amountSol: number,
+  slippageBps: number,
+): Promise<SwapQuote> {
+  const params = new URLSearchParams({
+    output_mint: outputMint,
+    amount_sol: String(amountSol),
+    slippage_bps: String(slippageBps),
+    include_raw: "true",
+  });
+  const response = await fetch(apiUrl(`/api/v1/execute/quote?${params}`), {
+    cache: "no-store",
+  });
+  return parseOrThrow<SwapQuote>(response, "quote");
+}
+
+export async function buildSwapTransaction(
+  quoteResponse: Record<string, unknown>,
+  userPublicKey: string,
+): Promise<{ swap_transaction: string; last_valid_block_height: number | null }> {
+  const response = await fetch(apiUrl("/api/v1/execute/swap-transaction"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      quote_response: quoteResponse,
+      user_public_key: userPublicKey,
+    }),
+  });
+  return parseOrThrow(response, "swap build");
+}
+
+export async function recordManualTrade(input: {
+  token_address: string;
+  trade_type: "buy" | "sell";
+  sol_amount: number;
+  signature: string;
+  slippage_bps?: number;
+}): Promise<void> {
+  const response = await fetch(apiUrl("/api/v1/execute/trades"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+  // 409 = already recorded (e.g. double-click) — not an error worth surfacing.
+  if (!response.ok && response.status !== 409) {
+    throw new Error(`trade recording failed: HTTP ${response.status}`);
+  }
+}
+
+/** Decode Jupiter's base64 transaction without relying on Buffer polyfills. */
+export function base64ToBytes(b64: string): Uint8Array {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
