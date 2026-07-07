@@ -6,6 +6,7 @@ tokens. The frontend Discovery page calls this on initial render and as a
 WebSocket reconnect fallback.
 """
 import logging
+import random
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -23,6 +24,9 @@ from schemas.discovery import FeedResponse, TokenFeedItem
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/discovery")
+
+# Fraction of requests that pay for the filtered-out observability COUNT.
+OBSERVABILITY_SAMPLE_RATE = 0.05
 
 
 def free_tier_cutoff(user: Optional[User]) -> Optional[datetime]:
@@ -89,28 +93,27 @@ def get_discovery_feed(
         rows = rows[:limit]
 
     # Observability: count tokens that the null-score filter dropped within
-    # the cursor window (or last hour if no cursor). Bounded to avoid a full
-    # table scan on every request as the tokens table grows.
-    # TODO(scaling): sample (1 in N requests) or move to periodic Celery task if traffic grows.
-    # Per-request COUNT becomes a hot-path cost on large tables.
-    count_window = window_filters or [
-        TokenSignal.scan_timestamp > datetime.now(timezone.utc) - timedelta(hours=1)
-    ]
-    filtered_out = (
-        db.query(TokenSignal)
-        .filter(
-            *count_window,
-            or_(
-                TokenSignal.momentum_score.is_(None),
-                TokenSignal.rug_risk_score.is_(None),
-            ),
+    # the cursor window (or last hour if no cursor). Sampled 1-in-20 so the
+    # COUNT never becomes a hot-path cost on large tables (was TODO(scaling)).
+    if random.random() < OBSERVABILITY_SAMPLE_RATE:
+        count_window = window_filters or [
+            TokenSignal.scan_timestamp > datetime.now(timezone.utc) - timedelta(hours=1)
+        ]
+        filtered_out = (
+            db.query(TokenSignal)
+            .filter(
+                *count_window,
+                or_(
+                    TokenSignal.momentum_score.is_(None),
+                    TokenSignal.rug_risk_score.is_(None),
+                ),
+            )
+            .count()
         )
-        .count()
-    )
-    logger.info(
-        "discovery/feed: returned=%d filtered_out=%d (in cursor-window or last 1h) since=%s limit=%d hide_honeypots=%s",
-        len(rows), filtered_out, since.isoformat() if since else None, limit, hide_honeypots,
-    )
+        logger.info(
+            "discovery/feed (sampled): returned=%d filtered_out=%d (in cursor-window or last 1h) since=%s limit=%d hide_honeypots=%s",
+            len(rows), filtered_out, since.isoformat() if since else None, limit, hide_honeypots,
+        )
 
     return FeedResponse(
         tokens=[TokenFeedItem.from_signal(s) for s in rows],

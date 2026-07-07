@@ -178,14 +178,15 @@ within its caps, and stops itself when the daily loss cap is hit.
   "change-me-in-production" — confirm prod overrides it), dependency
   audit, tighten CORS, penetration pass on auth + subscription endpoints,
   Helius webhook secret enforcement verification (code exists).
-- **Observability:** Sentry release tagging, uptime checks on `/health` +
-  `/health/pipeline`, Celery task failure alerting, structured logging.
-- **Performance debt:** the `TODO(scaling)` per-request COUNTs in
-  signals/discovery routes → sampled or periodic; leaderboard cache
-  warming; DB index review against real query plans.
-- **Known small debt:** repo-wide ESLint config is missing (`npm run
-  lint` is broken); pydantic class-based-config deprecation warning from a
-  dependency; multi-DEX `source_dex` still hardcoded (`TODO(task-2)`).
+- **Observability:** ✅ Sentry release tagging (deploy SHA + environment);
+  still open: uptime checks on `/health` + `/health/pipeline`, Celery task
+  failure alerting, structured logging.
+- **Performance debt:** ✅ per-request observability COUNTs now sampled
+  1-in-20; still open: leaderboard cache warming, DB index review against
+  real query plans.
+- **Known small debt:** ✅ ESLint fixed (flat config, `npm run lint` works
+  and gates CI); ✅ pydantic deprecation warning resolved; multi-DEX
+  `source_dex` still hardcoded (`TODO(task-2)`).
 - **Legal/product:** trading-risk disclaimers, ToS + privacy policy,
   jurisdiction gating decision, pricing page, onboarding flow, docs.
 

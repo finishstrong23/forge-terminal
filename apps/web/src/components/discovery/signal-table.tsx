@@ -13,17 +13,14 @@ import {
 } from "@tanstack/react-table";
 import {
   ArrowUpDown,
-  ArrowUp,
-  ArrowDown,
   Shield,
   TrendingUp,
   AlertTriangle,
-  ExternalLink,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { cn, formatUsd, formatNumber, scoreColor, scoreBg } from "@/lib/utils";
+import { cn, formatUsd, scoreColor, scoreBg } from "@/lib/utils";
 
 export interface TokenSignal {
   id: string;

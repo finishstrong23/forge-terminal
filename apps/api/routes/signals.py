@@ -1,4 +1,5 @@
 import logging
+import random
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -10,7 +11,7 @@ from core.database import get_db
 from models.token import TokenSignal
 from models.user import User
 from routes.auth import get_current_user_optional
-from routes.discovery import free_tier_cutoff
+from routes.discovery import OBSERVABILITY_SAMPLE_RATE, free_tier_cutoff
 
 logger = logging.getLogger(__name__)
 
@@ -56,26 +57,25 @@ def get_latest_signals(
     )
 
     # Observability: count tokens dropped by the null-score filter in the
-    # last hour. Bounded to avoid a full table scan on every request as the
-    # tokens table grows.
-    # TODO(scaling): sample (1 in N requests) or move to periodic Celery task if traffic grows.
-    # Per-request COUNT becomes a hot-path cost on large tables.
-    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-    filtered_out = (
-        db.query(TokenSignal)
-        .filter(
-            TokenSignal.scan_timestamp > one_hour_ago,
-            or_(
-                TokenSignal.momentum_score.is_(None),
-                TokenSignal.rug_risk_score.is_(None),
-            ),
+    # last hour. Sampled 1-in-20 so the COUNT never becomes a hot-path cost
+    # on large tables (was TODO(scaling)).
+    if random.random() < OBSERVABILITY_SAMPLE_RATE:
+        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+        filtered_out = (
+            db.query(TokenSignal)
+            .filter(
+                TokenSignal.scan_timestamp > one_hour_ago,
+                or_(
+                    TokenSignal.momentum_score.is_(None),
+                    TokenSignal.rug_risk_score.is_(None),
+                ),
+            )
+            .count()
         )
-        .count()
-    )
-    logger.info(
-        "signals/latest: returned=%d total_matching=%d filtered_out=%d (last 1h) page=%d per_page=%d",
-        len(signals), total, filtered_out, page, per_page,
-    )
+        logger.info(
+            "signals/latest (sampled): returned=%d total_matching=%d filtered_out=%d (last 1h) page=%d per_page=%d",
+            len(signals), total, filtered_out, page, per_page,
+        )
 
     return {
         "signals": [
