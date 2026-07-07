@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import {
   useReactTable,
   getCoreRowModel,
@@ -193,8 +194,14 @@ const columns: ColumnDef<TokenSignal>[] = [
     header: "",
     cell: ({ row }) => (
       <div className="flex items-center gap-1">
-        <Button variant="default" size="sm" className="h-7 text-xs">
-          Buy
+        {/* stopPropagation: the row click opens the detail panel. */}
+        <Button variant="default" size="sm" className="h-7 text-xs" asChild>
+          <Link
+            href={`/execute?mint=${encodeURIComponent(row.original.token_address)}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            Buy
+          </Link>
         </Button>
       </div>
     ),

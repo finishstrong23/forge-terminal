@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ExternalLink, Zap } from "lucide-react";
 import { VersionedTransaction } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/useAuth";
 import {
   base64ToBytes,
@@ -15,6 +17,7 @@ import {
   fetchSolPrice,
   recordManualTrade,
   type SwapQuote,
+  type SwapSide,
 } from "@/lib/execute";
 import { cn } from "@/lib/utils";
 
@@ -25,11 +28,23 @@ const QUOTE_DEBOUNCE_MS = 600;
 const ASSUMED_DECIMALS = 6;
 
 export default function ExecutePage() {
+  // useSearchParams requires a Suspense boundary for static prerendering.
+  return (
+    <Suspense fallback={<Skeleton className="h-32 w-full rounded-md" />}>
+      <ExecuteContent />
+    </Suspense>
+  );
+}
+
+function ExecuteContent() {
   const { connection } = useConnection();
   const { publicKey, connected, sendTransaction } = useWallet();
   const { user } = useAuth();
+  const searchParams = useSearchParams();
 
-  const [outputMint, setOutputMint] = useState("");
+  // Buy buttons on Discovery rows land here as /execute?mint=<address>.
+  const [outputMint, setOutputMint] = useState(searchParams.get("mint") ?? "");
+  const [side, setSide] = useState<SwapSide>("buy");
   const [amountSol, setAmountSol] = useState("");
   const [slippageBps, setSlippageBps] = useState(100);
   const [solPrice, setSolPrice] = useState<number | null>(null);
@@ -56,7 +71,7 @@ export default function ExecutePage() {
     let cancelled = false;
     setQuoting(true);
     const timer = setTimeout(() => {
-      fetchQuote(outputMint, amount, slippageBps)
+      fetchQuote({ tokenMint: outputMint, side, amount, slippageBps })
         .then((q) => {
           if (!cancelled) setQuote(q);
         })
@@ -71,7 +86,7 @@ export default function ExecutePage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [outputMint, amountSol, slippageBps]);
+  }, [outputMint, amountSol, slippageBps, side]);
 
   const handleSwap = useCallback(async () => {
     if (!quote?.quote_response || !publicKey) return;
@@ -84,10 +99,15 @@ export default function ExecutePage() {
       setResult({ signature });
       if (user) {
         // Best-effort ledger entry; the swap succeeded regardless.
+        // For sells, SOL amount = the quoted SOL received (exact 9 dp).
+        const solAmount =
+          side === "buy"
+            ? parseFloat(amountSol)
+            : Number(quote.out_amount ?? 0) / 1e9;
         void recordManualTrade({
-          token_address: quote.output_mint,
-          trade_type: "buy",
-          sol_amount: parseFloat(amountSol),
+          token_address: side === "buy" ? quote.output_mint : quote.input_mint,
+          trade_type: side,
+          sol_amount: solAmount,
           signature,
           slippage_bps: slippageBps,
         }).catch(() => undefined);
@@ -97,16 +117,21 @@ export default function ExecutePage() {
     } finally {
       setSwapping(false);
     }
-  }, [quote, publicKey, sendTransaction, connection, user, amountSol, slippageBps]);
+  }, [quote, publicKey, sendTransaction, connection, user, amountSol, slippageBps, side]);
 
   const amount = parseFloat(amountSol);
   const usdEstimate =
-    solPrice !== null && Number.isFinite(amount) && amount > 0
+    side === "buy" && solPrice !== null && Number.isFinite(amount) && amount > 0
       ? amount * solPrice
       : null;
+  // Buys receive tokens (assumed decimals); sells receive SOL (exact 9 dp).
   const estimatedTokens =
-    quote?.out_amount != null
+    side === "buy" && quote?.out_amount != null
       ? Number(quote.out_amount) / 10 ** ASSUMED_DECIMALS
+      : null;
+  const estimatedSol =
+    side === "sell" && quote?.out_amount != null
+      ? Number(quote.out_amount) / 1e9
       : null;
 
   return (
@@ -123,6 +148,25 @@ export default function ExecutePage() {
       </div>
 
       <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
+        <div className="flex rounded-md border border-border p-0.5">
+          {(["buy", "sell"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSide(s)}
+              className={cn(
+                "flex-1 rounded px-2 py-1.5 text-xs font-medium uppercase transition-colors",
+                s === side
+                  ? s === "buy"
+                    ? "bg-green-400/15 text-green-400"
+                    : "bg-red-400/15 text-red-400"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+
         <div>
           <label htmlFor="mint" className="mb-1 block text-xs text-muted-foreground">
             Token mint address
@@ -139,7 +183,7 @@ export default function ExecutePage() {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label htmlFor="amount" className="mb-1 block text-xs text-muted-foreground">
-              Amount (SOL)
+              {side === "buy" ? "Amount (SOL)" : "Amount (tokens)"}
             </label>
             <Input
               id="amount"
@@ -148,7 +192,7 @@ export default function ExecutePage() {
               step="0.1"
               value={amountSol}
               onChange={(e) => setAmountSol(e.target.value)}
-              placeholder="0.5"
+              placeholder={side === "buy" ? "0.5" : "1000"}
             />
             {usdEstimate !== null && (
               <span className="mt-1 block font-mono-numbers text-[10px] text-muted-foreground">
@@ -190,9 +234,15 @@ export default function ExecutePage() {
             <div className="flex justify-between">
               <span className="text-muted-foreground">Estimated received</span>
               <span className="font-mono-numbers">
-                {estimatedTokens !== null
-                  ? `≈ ${estimatedTokens.toLocaleString(undefined, { maximumFractionDigits: 2 })} tokens`
-                  : "—"}
+                {side === "buy"
+                  ? estimatedTokens !== null
+                    ? `≈ ${estimatedTokens.toLocaleString(undefined, { maximumFractionDigits: 2 })} tokens`
+                    : "—"
+                  : estimatedSol !== null
+                    ? `${estimatedSol.toFixed(4)} SOL${
+                        solPrice !== null ? ` (≈ $${(estimatedSol * solPrice).toFixed(2)})` : ""
+                      }`
+                    : "—"}
               </span>
             </div>
             <div className="flex justify-between">
@@ -207,10 +257,12 @@ export default function ExecutePage() {
               <span className="text-muted-foreground">Route</span>
               <span>{quote.route_labels.filter(Boolean).join(" → ") || "—"}</span>
             </div>
-            <p className="pt-1 text-[10px] text-muted-foreground">
-              Token amount assumes {ASSUMED_DECIMALS} decimals — verify the exact
-              amount in your wallet before signing.
-            </p>
+            {side === "buy" && (
+              <p className="pt-1 text-[10px] text-muted-foreground">
+                Token amount assumes {ASSUMED_DECIMALS} decimals — verify the
+                exact amount in your wallet before signing.
+              </p>
+            )}
           </div>
         )}
 

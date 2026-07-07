@@ -5,9 +5,12 @@
 import { apiUrl } from "./api";
 import { authHeaders } from "./auth";
 
+export type SwapSide = "buy" | "sell";
+
 export interface SwapQuote {
   input_mint: string;
   output_mint: string;
+  side: SwapSide;
   in_amount: string | null;
   out_amount: string | null;
   other_amount_threshold: string | null;
@@ -37,17 +40,25 @@ export async function fetchSolPrice(): Promise<number> {
   return body.sol_usd;
 }
 
-export async function fetchQuote(
-  outputMint: string,
-  amountSol: number,
-  slippageBps: number,
-): Promise<SwapQuote> {
+export async function fetchQuote(input: {
+  tokenMint: string;
+  side: SwapSide;
+  amount: number; // SOL for buys, tokens for sells
+  slippageBps: number;
+  tokenDecimals?: number;
+}): Promise<SwapQuote> {
   const params = new URLSearchParams({
-    output_mint: outputMint,
-    amount_sol: String(amountSol),
-    slippage_bps: String(slippageBps),
+    token_mint: input.tokenMint,
+    side: input.side,
+    slippage_bps: String(input.slippageBps),
     include_raw: "true",
   });
+  if (input.side === "buy") {
+    params.set("amount_sol", String(input.amount));
+  } else {
+    params.set("amount_tokens", String(input.amount));
+    params.set("token_decimals", String(input.tokenDecimals ?? 6));
+  }
   const response = await fetch(apiUrl(`/api/v1/execute/quote?${params}`), {
     cache: "no-store",
   });

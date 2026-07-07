@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     HELIUS_API_KEY: Optional[str] = None
     HELIUS_WEBHOOK_SECRET: Optional[str] = None
     HELIUS_RPC_URL: Optional[str] = None
+    # Preferred RPC for confirmation checks; falls back to HELIUS_RPC_URL,
+    # then the public mainnet endpoint.
+    SOLANA_RPC_URL: Optional[str] = None
 
     PUMP_FUN_PROGRAM_ID: str = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
     HELIUS_WEBHOOK_ID: Optional[str] = None

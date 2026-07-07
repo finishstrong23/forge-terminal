@@ -345,6 +345,29 @@ def refresh_sol_price():
     return {"status": "completed", "sol_usd": price}
 
 
+@celery_app.task(name="tasks.check_trade_confirmations")
+def check_trade_confirmations():
+    """
+    Periodic task: resolve submitted manual trades against the chain.
+    Runs every 2 minutes via Celery Beat.
+    """
+    from core.heartbeat import beat
+    from services.execution.confirmations import check_pending_trades
+
+    db = _get_db()
+    try:
+        result = check_pending_trades(db)
+        db.commit()
+        beat("check_trade_confirmations")
+        return {"status": "completed", **result}
+    except Exception as exc:
+        db.rollback()
+        print(f"Failed to check trade confirmations: {exc}")
+        return {"status": "error", "error": str(exc)}
+    finally:
+        db.close()
+
+
 # ==================== TOKEN DISCOVERY ====================
 
 @celery_app.task(name="tasks.discover_new_tokens")

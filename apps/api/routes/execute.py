@@ -48,22 +48,39 @@ def sol_price():
 
 @router.get("/quote")
 def swap_quote(
-    output_mint: str = Query(..., min_length=32, max_length=64),
-    amount_sol: float = Query(..., gt=0, le=10_000),
+    token_mint: str = Query(..., min_length=32, max_length=64,
+                            description="The non-SOL side of the swap."),
+    side: Literal["buy", "sell"] = Query(
+        "buy", description="buy = SOL -> token, sell = token -> SOL."
+    ),
+    amount_sol: Optional[float] = Query(None, gt=0, le=10_000,
+                                        description="Input SOL (buy side)."),
+    amount_tokens: Optional[float] = Query(None, gt=0,
+                                           description="Input tokens (sell side)."),
+    token_decimals: int = Query(6, ge=0, le=12,
+                                description="Token decimals for sell-amount conversion."),
     slippage_bps: int = Query(100, ge=1, le=5_000),
     include_raw: bool = Query(
         False, description="Include Jupiter's full quote for /swap-transaction."
     ),
 ):
-    """
-    Quote a SOL -> token swap. v1 fixes the input side to SOL, which covers
-    the terminal's buy flow; sells come with the wallet increment.
-    """
+    """Quote a swap between SOL and a token, either direction."""
+    if side == "buy":
+        if amount_sol is None:
+            raise HTTPException(status_code=422, detail="amount_sol is required for buys")
+        input_mint, output_mint = price_feed.SOL_MINT, token_mint
+        amount_raw = int(amount_sol * LAMPORTS_PER_SOL)
+    else:
+        if amount_tokens is None:
+            raise HTTPException(status_code=422, detail="amount_tokens is required for sells")
+        input_mint, output_mint = token_mint, price_feed.SOL_MINT
+        amount_raw = int(amount_tokens * (10 ** token_decimals))
+
     try:
         quote = get_quote(
-            input_mint=price_feed.SOL_MINT,
+            input_mint=input_mint,
             output_mint=output_mint,
-            amount_raw=int(amount_sol * LAMPORTS_PER_SOL),
+            amount_raw=amount_raw,
             slippage_bps=slippage_bps,
         )
     except JupiterUnavailable as exc:
@@ -72,8 +89,9 @@ def swap_quote(
     # Trimmed passthrough: enough for a swap ticket without leaking the
     # full route plan payload.
     result = {
-        "input_mint": price_feed.SOL_MINT,
+        "input_mint": input_mint,
         "output_mint": output_mint,
+        "side": side,
         "in_amount": quote.get("inAmount"),
         "out_amount": quote.get("outAmount"),
         "other_amount_threshold": quote.get("otherAmountThreshold"),
@@ -138,6 +156,7 @@ class ManualTradeResponse(BaseModel):
     slippage_pct: Optional[float] = None
     signature: Optional[str] = None
     status: str
+    error_message: Optional[str] = None
     executed_at: Optional[datetime] = None
     created_at: datetime
 

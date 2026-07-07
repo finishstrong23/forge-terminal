@@ -104,6 +104,24 @@ test.describe("Discovery Page", () => {
     await expect(page.getByText("HONEYPOT", { exact: true })).toBeVisible();
   });
 
+  test("Buy button navigates to Execute with the mint prefilled", async ({ page }) => {
+    await mockFeed(page, { tokens: [mockToken], count: 1, has_more: false });
+    await page.route("**/api/v1/execute/price", (route: Route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ sol_usd: 150 }),
+      }),
+    );
+    await page.goto("/discovery");
+
+    await page.getByRole("link", { name: "Buy" }).click();
+    await expect(page).toHaveURL(new RegExp(`/execute\\?mint=${mockToken.token_address}`));
+    await expect(page.getByLabel("Token mint address")).toHaveValue(
+      mockToken.token_address,
+    );
+  });
+
   test("clicking a row opens the detail panel", async ({ page }) => {
     await mockFeed(page, { tokens: [mockToken], count: 1, has_more: false });
     await page.goto("/discovery");

@@ -69,6 +69,41 @@ test.describe("Execute", () => {
     await expect(page.getByText(/Jupiter quote unavailable/)).toBeVisible();
   });
 
+  test("mint query param prefills the ticket (Buy button flow)", async ({ page }) => {
+    await page.route("**/api/v1/execute/price", (route) =>
+      fulfillJson(route, { sol_usd: 150 }),
+    );
+    await page.goto(`/execute?mint=${MINT}`);
+    await expect(page.getByLabel("Token mint address")).toHaveValue(MINT);
+  });
+
+  test("sell side quotes token -> SOL", async ({ page }) => {
+    await page.route("**/api/v1/execute/price", (route) =>
+      fulfillJson(route, { sol_usd: 150 }),
+    );
+    const requests: string[] = [];
+    await page.route("**/api/v1/execute/quote*", (route) => {
+      requests.push(route.request().url());
+      return fulfillJson(route, {
+        ...QUOTE,
+        side: "sell",
+        input_mint: MINT,
+        output_mint: "So11111111111111111111111111111111111111112",
+        out_amount: "2500000000", // 2.5 SOL
+      });
+    });
+    await page.goto("/execute");
+
+    await page.getByRole("button", { name: "sell" }).click();
+    await page.getByLabel("Token mint address").fill(MINT);
+    await page.getByLabel("Amount (tokens)").fill("1000");
+
+    await expect(page.getByText(/2\.5000 SOL/)).toBeVisible();
+    await expect
+      .poll(() => requests.some((u) => u.includes("side=sell") && u.includes("amount_tokens=1000")))
+      .toBe(true);
+  });
+
   test("swap stays disabled without a connected wallet", async ({ page }) => {
     await page.route("**/api/v1/execute/price", (route) =>
       fulfillJson(route, { sol_usd: 150 }),
