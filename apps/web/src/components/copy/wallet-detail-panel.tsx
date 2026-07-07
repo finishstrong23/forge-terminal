@@ -14,6 +14,7 @@ import {
   formatSol,
   type LeaderboardWindow,
 } from "@/lib/copy-leaderboard";
+import { FollowSection } from "@/components/copy/follow-section";
 import { ScoreSparkline } from "@/components/copy/score-sparkline";
 import type { ApiScoreSnapshot, ApiWalletDetailResponse } from "@/lib/types";
 
@@ -208,6 +209,8 @@ export function WalletDetailPanel({
                 Linked to a funding cluster — possible insider activity
               </Badge>
             )}
+
+            <FollowSection walletAddress={walletAddress} />
 
             {scoredSnapshots.length >= 2 && (
               <div>

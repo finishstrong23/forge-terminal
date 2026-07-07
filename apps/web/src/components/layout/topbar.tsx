@@ -1,15 +1,20 @@
 "use client";
 
 import React from "react";
-import { Search, Bell, Wallet } from "lucide-react";
+import Link from "next/link";
+import { Search, Bell, Wallet, LogIn, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/hooks/useAuth";
 
 interface TopbarProps {
   onCommandPalette: () => void;
 }
 
 export function Topbar({ onCommandPalette }: TopbarProps) {
+  const { user, signOut } = useAuth();
+  const tier = (user?.subscription_tier ?? "free").toUpperCase();
+
   return (
     <header className="flex h-14 items-center justify-between border-b border-border bg-surface px-4">
       <button
@@ -24,7 +29,7 @@ export function Topbar({ onCommandPalette }: TopbarProps) {
       </button>
 
       <div className="flex items-center gap-3">
-        <Badge variant="tier">FREE</Badge>
+        <Badge variant="tier">{tier}</Badge>
 
         <Button variant="ghost" size="icon" className="relative">
           <Bell className="h-4 w-4" />
@@ -34,6 +39,24 @@ export function Topbar({ onCommandPalette }: TopbarProps) {
           <Wallet className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">Connect Wallet</span>
         </Button>
+
+        {user ? (
+          <div className="flex items-center gap-2">
+            <span className="hidden max-w-[160px] truncate text-xs text-muted-foreground md:inline">
+              {user.email}
+            </span>
+            <Button variant="ghost" size="icon" title="Sign out" onClick={signOut}>
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : (
+          <Button variant="default" size="sm" className="gap-2" asChild>
+            <Link href="/login">
+              <LogIn className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Sign in</span>
+            </Link>
+          </Button>
+        )}
       </div>
     </header>
   );

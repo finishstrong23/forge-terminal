@@ -108,3 +108,64 @@ export interface ApiScoreHistoryResponse {
   snapshots: ApiScoreSnapshot[];
   count: number;
 }
+
+/**
+ * Auth + copy-subscription wire types.
+ * Source of truth: apps/api/schemas/auth.py and apps/api/schemas/copy.py.
+ */
+
+export interface ApiUser {
+  id: string;
+  email: string;
+  role: string;
+  subscription_tier: string;
+  created_at: string; // ISO 8601 datetime
+}
+
+export interface ApiTokenResponse {
+  access_token: string;
+  token_type: string;
+  user: ApiUser;
+}
+
+export interface ApiCopySubscription {
+  id: string;
+  wallet_address: string;
+  mode: string;
+  status: string;
+  max_position_usd: number | null;
+  daily_loss_cap_usd: number | null;
+  slippage_tolerance: number | null;
+  min_sustainability_score: number | null;
+  token_blacklist: string[] | null;
+  started_at: string | null;
+  paused_at: string | null;
+  stopped_at: string | null;
+  created_at: string;
+}
+
+export interface ApiCopySubscriptionList {
+  subscriptions: ApiCopySubscription[];
+  count: number;
+}
+
+export interface ApiShadowTrade {
+  id: string;
+  token_address: string;
+  trade_type: string;
+  source: string;
+  sol_amount: number | null;
+  price_at_trade: number | null;
+  status: string;
+  error_message: string | null;
+  copy_subscription_id: string | null;
+  rug_risk_at_trade: number | null;
+  momentum_at_trade: number | null;
+  executed_at: string | null;
+  created_at: string;
+}
+
+export interface ApiShadowTradeList {
+  trades: ApiShadowTrade[];
+  count: number;
+}

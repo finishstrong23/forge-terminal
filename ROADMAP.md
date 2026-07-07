@@ -63,17 +63,17 @@ with a LIVE badge; `/health/pipeline` is green on every subsystem.
 Backend for all of this is merged and live after M0; this milestone makes
 it usable by humans.
 
-- Merge PR #1 (CI green; adds copy module + auth + shadow subscriptions).
-- **Auth UI:** login/signup (page or modal), token storage, auth context,
-  logged-in topbar state (email + real tier badge replacing the hardcoded
-  FREE; "Connect Wallet" stays a stub until M3).
-- **Follow flow:** Follow button + risk-parameter form (position cap, loss
-  cap, min sustainability, blacklist) in the wallet detail panel; a "My
-  follows" management view (pause/resume/stop).
-- **Shadow ledger UI:** simulated-vs-skipped trades with reasons — this is
-  the "try before you trust" product moment. Lives under Portfolio (which
-  is otherwise a Phase 3 placeholder).
-- e2e coverage for register→login→follow→ledger.
+- ✅ Merge PR #1 (CI green; adds copy module + auth + shadow subscriptions).
+- ✅ **Auth UI:** /login page with signup toggle, localStorage token, auth
+  context, logged-in topbar state (email + tier badge from the session;
+  "Connect Wallet" stays a stub until M3).
+- ✅ **Follow flow:** Follow button + risk params (position cap, min
+  sustainability) in the wallet detail panel; follows management with
+  pause/resume/stop lives on Portfolio.
+- ✅ **Shadow ledger UI:** simulated-vs-skipped trades with reasons on the
+  Portfolio page — the "try before you trust" product moment.
+- ✅ e2e coverage: login/signup, failed login, signed-out prompts, follow
+  (success + 409), portfolio tables, pause action (35 Playwright tests).
 
 **Exit test:** a fresh user can sign up, follow a leaderboard wallet, and
 see shadow trades appear in their ledger within minutes — in prod.
