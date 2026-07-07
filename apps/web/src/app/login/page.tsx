@@ -134,6 +134,20 @@ function LoginContent() {
                 ? "Sign in"
                 : "Create account"}
           </Button>
+
+          {mode === "register" && (
+            <p className="text-center text-[10px] leading-relaxed text-muted-foreground">
+              By creating an account you agree to the{" "}
+              <Link href="/terms" className="underline hover:text-foreground">
+                Terms of Service
+              </Link>{" "}
+              and acknowledge the{" "}
+              <Link href="/disclaimer" className="underline hover:text-foreground">
+                Risk Disclosure
+              </Link>
+              .
+            </p>
+          )}
         </form>
 
         <button
