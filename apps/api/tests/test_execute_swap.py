@@ -22,12 +22,12 @@ def test_quote_include_raw_carries_full_payload(client, db, monkeypatch):
     monkeypatch.setattr(execute_routes, "get_quote", lambda **kw: full_quote)
 
     r = client.get("/api/v1/execute/quote", params={
-        "output_mint": "TokenMint111111111111111111111111111111111",
+        "token_mint": "TokenMint111111111111111111111111111111111",
         "amount_sol": 1})
     assert "quote_response" not in r.json()
 
     r = client.get("/api/v1/execute/quote", params={
-        "output_mint": "TokenMint111111111111111111111111111111111",
+        "token_mint": "TokenMint111111111111111111111111111111111",
         "amount_sol": 1, "include_raw": True})
     assert r.json()["quote_response"] == full_quote
 

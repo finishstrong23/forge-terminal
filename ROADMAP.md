@@ -124,10 +124,13 @@ visible value early.
   Jupiter quote (price impact, route), slippage presets, swap tx built
   server-side (`POST /execute/swap-transaction`, keys never leave the
   wallet), signed + sent client-side, recorded to `ExecutedTrade`
-  (source=manual) via `POST /execute/trades`. Still pending: sell side,
-  Buy buttons on Discovery/Copy rows, priority-fee UI, Jito MEV
-  protection, a confirmation-checker beat task (recorded trades stay
-  "submitted"), and real token decimals on the ticket.
+  (source=manual) via `POST /execute/trades`. ✅ Sell side (token->SOL
+  quoting with decimals param), ✅ Buy buttons on Discovery rows
+  prefilling the Execute ticket, ✅ confirmation-checker beat task
+  (submitted -> confirmed/failed via batched getSignatureStatuses;
+  expires never-landed txs after 15 min; `SOLANA_RPC_URL` config).
+  Still pending: priority-fee UI, Jito MEV protection, real token
+  decimals lookup on the ticket.
 - Execute page: swap ticket + open positions; Portfolio: real holdings +
   PnL from `ExecutedTrade`.
 - Record executed trades with the risk-context columns already in the

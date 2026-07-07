@@ -110,7 +110,7 @@ def test_quote_endpoint_trims_jupiter_payload(client, db, monkeypatch):
 
     monkeypatch.setattr(execute_routes, "get_quote", fake_quote)
     r = client.get("/api/v1/execute/quote", params={
-        "output_mint": "TokenMint111111111111111111111111111111111",
+        "token_mint": "TokenMint111111111111111111111111111111111",
         "amount_sol": 1.5,
         "slippage_bps": 150,
     })
@@ -131,7 +131,7 @@ def test_quote_endpoint_503_when_jupiter_down(client, db, monkeypatch):
 
     monkeypatch.setattr(execute_routes, "get_quote", boom)
     r = client.get("/api/v1/execute/quote", params={
-        "output_mint": "TokenMint111111111111111111111111111111111",
+        "token_mint": "TokenMint111111111111111111111111111111111",
         "amount_sol": 1,
     })
     assert r.status_code == 503
@@ -139,7 +139,7 @@ def test_quote_endpoint_503_when_jupiter_down(client, db, monkeypatch):
 
 def test_quote_endpoint_validates_params(client, db):
     assert client.get("/api/v1/execute/quote", params={
-        "output_mint": "short", "amount_sol": 1}).status_code == 422
+        "token_mint": "short", "amount_sol": 1}).status_code == 422
     assert client.get("/api/v1/execute/quote", params={
-        "output_mint": "TokenMint111111111111111111111111111111111",
+        "token_mint": "TokenMint111111111111111111111111111111111",
         "amount_sol": -1}).status_code == 422

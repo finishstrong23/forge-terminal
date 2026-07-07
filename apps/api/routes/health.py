@@ -31,6 +31,7 @@ BEAT_STALENESS_LIMITS = {
     "discover_new_tokens": 5 * 60,          # runs every 60s
     "record_shadow_trades": 5 * 60,         # runs every 60s
     "refresh_sol_price": 5 * 60,            # runs every 60s
+    "check_trade_confirmations": 10 * 60,   # runs every 2m
     "aggregate_metric_snapshots": 20 * 60,  # runs every 5m
     "score_wallets": 45 * 60,               # runs every 15m
     "send_email_digest": 25 * 3600,         # hourly + daily variants
