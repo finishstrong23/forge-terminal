@@ -222,6 +222,7 @@ export default function PortfolioPage() {
                   <th className="px-3 py-2">Token</th>
                   <th className="px-3 py-2">Side</th>
                   <th className="px-3 py-2">SOL</th>
+                  <th className="px-3 py-2">USD</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Reason</th>
                 </tr>
@@ -250,6 +251,9 @@ export default function PortfolioPage() {
                     </td>
                     <td className="px-3 py-2 font-mono-numbers text-xs">
                       {t.sol_amount !== null ? t.sol_amount.toFixed(2) : "—"}
+                    </td>
+                    <td className="px-3 py-2 font-mono-numbers text-xs text-muted-foreground">
+                      {t.usd_value != null ? `$${t.usd_value.toFixed(2)}` : "—"}
                     </td>
                     <td className="px-3 py-2">
                       <Badge

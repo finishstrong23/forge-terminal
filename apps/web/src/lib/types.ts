@@ -156,6 +156,7 @@ export interface ApiShadowTrade {
   trade_type: string;
   source: string;
   sol_amount: number | null;
+  usd_value?: number | null;
   price_at_trade: number | null;
   status: string;
   error_message: string | null;

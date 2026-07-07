@@ -113,11 +113,15 @@ Sequenced to defer the hardest risk (automated custody) while shipping
 visible value early.
 
 - **Wallet connect** (Solana wallet-adapter) — non-custodial.
-- **SOL/USD + token price feed** ingestion (also unblocks USD risk caps
-  that shadow mode stores but can't enforce — documented gap from PR #1).
-- **Manual swaps:** Buy button on Discovery/Copy → Jupiter quote → user
-  signs in their own wallet. Slippage controls, priority fees, optional
-  MEV protection (Jito bundle submission).
+- ✅ **SOL/USD price feed**: Jupiter price API + CoinGecko fallback,
+  Redis-cached, refreshed by a 60s beat task (heartbeat-monitored),
+  `GET /api/v1/execute/price`. `max_position_usd` is now ENFORCED in
+  shadow mode (usd_value stamped on ledger rows; cap skips carry a
+  reason). Token-level price feed + daily loss cap still pending.
+- **Manual swaps:** Buy button on Discovery/Copy → Jupiter quote (✅
+  quote proxy at `GET /api/v1/execute/quote`, SOL-input v1) → user
+  signs in their own wallet. Swap building, slippage controls, priority
+  fees, optional MEV protection (Jito) pending.
 - Execute page: swap ticket + open positions; Portfolio: real holdings +
   PnL from `ExecutedTrade`.
 - Record executed trades with the risk-context columns already in the

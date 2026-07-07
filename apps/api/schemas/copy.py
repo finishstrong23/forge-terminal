@@ -134,6 +134,7 @@ class ShadowTradeResponse(BaseModel):
     trade_type: str
     source: str
     sol_amount: Optional[float] = None
+    usd_value: Optional[float] = None
     price_at_trade: Optional[float] = None
     status: str
     error_message: Optional[str] = None

@@ -71,6 +71,10 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.record_shadow_trades",
         "schedule": 60.0,  # every 60 seconds
     },
+    "refresh-sol-price": {
+        "task": "tasks.refresh_sol_price",
+        "schedule": 60.0,  # every 60 seconds
+    },
     "send-email-digest-hourly": {
         "task": "tasks.send_email_digest",
         "schedule": 3600.0,  # every hour

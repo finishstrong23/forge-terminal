@@ -16,3 +16,4 @@ stripe==12.2.0
 sentry-sdk[fastapi]==2.29.1
 celery==5.4.0
 requests==2.32.3
+httpx==0.28.1
