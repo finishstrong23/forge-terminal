@@ -95,9 +95,10 @@ sellable product without touching custody/execution risk.
   gated to paid tiers (JWT via `?token=`, free sockets fall back to
   delayed polling); follow limits (3 free / 50 pro). Daily signal cap
   still pending.
-- Auth hardening that must precede real accounts: per-IP throttling on
-  register/login, password reset + email verification (SMTP config +
-  alert_service exist), refresh tokens or shorter access-token TTL.
+- ✅ Auth hardening: per-IP throttling on register/login/forgot (Redis
+  fixed-window, fail-open), password reset via purpose-scoped JWT links,
+  email verification (migration 002 + emailed link + login-page banner).
+  Still open: refresh tokens or a shorter access-token TTL than 7 days.
 - ✅ Settings page: account, plan with upgrade (checkout) or manage
   billing (portal), sign out, checkout success/cancel banners.
 

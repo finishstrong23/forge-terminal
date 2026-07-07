@@ -1,20 +1,51 @@
 "use client";
 
-import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Flame } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
+import { apiVerifyEmail } from "@/lib/auth";
 import { useAuth, type AuthMode } from "@/hooks/useAuth";
 
 export default function LoginPage() {
+  // useSearchParams requires a Suspense boundary for static prerendering.
+  return (
+    <Suspense fallback={<Skeleton className="h-32 w-full rounded-md" />}>
+      <LoginContent />
+    </Suspense>
+  );
+}
+
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { signIn } = useAuth();
   const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [verifyState, setVerifyState] = useState<"idle" | "ok" | "failed">("idle");
+
+  // Emailed verification links land here as /login?verify_token=...
+  const verifyToken = searchParams.get("verify_token");
+  useEffect(() => {
+    if (!verifyToken) return;
+    let unmounted = false;
+    apiVerifyEmail(verifyToken)
+      .then(() => {
+        if (!unmounted) setVerifyState("ok");
+      })
+      .catch(() => {
+        if (!unmounted) setVerifyState("failed");
+      });
+    return () => {
+      unmounted = true;
+    };
+  }, [verifyToken]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,6 +77,17 @@ export default function LoginPage() {
               : "Follow top wallets and build your shadow ledger."}
           </p>
         </div>
+
+        {verifyState === "ok" && (
+          <div className="mb-3 rounded border border-green-400/30 bg-green-400/10 px-3 py-2 text-xs text-green-400">
+            Email verified — sign in below.
+          </div>
+        )}
+        {verifyState === "failed" && (
+          <div className="mb-3 rounded border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-400">
+            That verification link is invalid or expired.
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
@@ -106,6 +148,17 @@ export default function LoginPage() {
             ? "No account? Create one"
             : "Already have an account? Sign in"}
         </button>
+
+        {mode === "login" && (
+          <div className="mt-2 text-center">
+            <Link
+              href="/forgot-password"
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Forgot password?
+            </Link>
+          </div>
+        )}
       </div>
     </div>
   );

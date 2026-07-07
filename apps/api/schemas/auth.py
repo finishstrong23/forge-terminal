@@ -21,11 +21,22 @@ class LoginRequest(BaseModel):
     password: str = Field(max_length=72)
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    # Max 72: bcrypt truncates beyond 72 bytes (see core/security.py).
+    new_password: str = Field(min_length=8, max_length=72)
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     email: str
+    email_verified: bool = False
     role: str
     subscription_tier: str
     created_at: datetime

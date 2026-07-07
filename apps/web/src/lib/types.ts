@@ -117,6 +117,7 @@ export interface ApiScoreHistoryResponse {
 export interface ApiUser {
   id: string;
   email: string;
+  email_verified?: boolean;
   role: string;
   subscription_tier: string;
   created_at: string; // ISO 8601 datetime

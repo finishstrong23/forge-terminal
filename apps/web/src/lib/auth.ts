@@ -66,6 +66,40 @@ export function apiRegister(email: string, password: string): Promise<ApiTokenRe
   return authRequest("/api/v1/auth/register", email, password);
 }
 
+/** Request a reset email. Backend always answers 200 (no account leaking). */
+export async function apiForgotPassword(email: string): Promise<void> {
+  const response = await fetch(apiUrl("/api/v1/auth/forgot-password"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!response.ok) {
+    throw new Error(await errorDetail(response, `request failed: HTTP ${response.status}`));
+  }
+}
+
+/** Set a new password using an emailed reset token. */
+export async function apiResetPassword(token: string, newPassword: string): Promise<void> {
+  const response = await fetch(apiUrl("/api/v1/auth/reset-password"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, new_password: newPassword }),
+  });
+  if (!response.ok) {
+    throw new Error(await errorDetail(response, `reset failed: HTTP ${response.status}`));
+  }
+}
+
+/** Confirm an emailed verification token. */
+export async function apiVerifyEmail(token: string): Promise<void> {
+  const response = await fetch(
+    apiUrl(`/api/v1/auth/verify-email?token=${encodeURIComponent(token)}`),
+  );
+  if (!response.ok) {
+    throw new Error(await errorDetail(response, `verification failed: HTTP ${response.status}`));
+  }
+}
+
 /** Resolve the stored token to the current user. Throws on 401/network. */
 export async function fetchMe(): Promise<ApiUser> {
   const response = await fetch(apiUrl("/api/v1/auth/me"), {
