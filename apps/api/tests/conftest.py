@@ -37,6 +37,9 @@ def _no_live_prices(monkeypatch):
     monkeypatch.setattr(
         "services.execution.price_feed.fetch_sol_price_usd", lambda: None
     )
+    monkeypatch.setattr(
+        "services.execution.token_meta.fetch_token_decimals", lambda mint: None
+    )
 
 
 @pytest.fixture()

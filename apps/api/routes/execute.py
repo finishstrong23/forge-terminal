@@ -37,6 +37,15 @@ router = APIRouter(prefix="/api/v1/execute")
 LAMPORTS_PER_SOL = 1_000_000_000
 
 
+@router.get("/token-meta")
+def token_meta(mint: str = Query(..., min_length=32, max_length=64)):
+    """Mint decimals for the swap ticket. decimals=null -> UI falls back to
+    the documented 6-decimals assumption with its caveat."""
+    from services.execution.token_meta import get_token_decimals
+
+    return {"mint": mint, "decimals": get_token_decimals(mint)}
+
+
 @router.get("/price")
 def sol_price():
     """Cached SOL/USD. 503 when no source is reachable (UI shows a dash)."""

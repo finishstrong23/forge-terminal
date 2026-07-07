@@ -15,6 +15,7 @@ import {
   buildSwapTransaction,
   fetchQuote,
   fetchSolPrice,
+  fetchTokenDecimals,
   recordManualTrade,
   type SwapQuote,
   type SwapSide,
@@ -65,6 +66,20 @@ function ExecuteContent() {
     fetchSolPrice().then(setSolPrice).catch(() => setSolPrice(null));
   }, []);
 
+  // Real mint decimals when available; null keeps the 6-dp fallback + caveat.
+  const [tokenDecimals, setTokenDecimals] = useState<number | null>(null);
+  useEffect(() => {
+    setTokenDecimals(null);
+    if (!outputMint || outputMint.length < 32) return;
+    let cancelled = false;
+    fetchTokenDecimals(outputMint).then((d) => {
+      if (!cancelled) setTokenDecimals(d);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [outputMint]);
+
   // Debounced quoting whenever the ticket inputs change.
   useEffect(() => {
     setQuote(null);
@@ -77,7 +92,13 @@ function ExecuteContent() {
     let cancelled = false;
     setQuoting(true);
     const timer = setTimeout(() => {
-      fetchQuote({ tokenMint: outputMint, side, amount, slippageBps })
+      fetchQuote({
+        tokenMint: outputMint,
+        side,
+        amount,
+        slippageBps,
+        tokenDecimals: tokenDecimals ?? undefined,
+      })
         .then((q) => {
           if (!cancelled) setQuote(q);
         })
@@ -92,7 +113,7 @@ function ExecuteContent() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [outputMint, amountSol, slippageBps, side]);
+  }, [outputMint, amountSol, slippageBps, side, tokenDecimals]);
 
   const handleSwap = useCallback(async () => {
     if (!quote?.quote_response || !publicKey) return;
@@ -130,10 +151,11 @@ function ExecuteContent() {
     side === "buy" && solPrice !== null && Number.isFinite(amount) && amount > 0
       ? amount * solPrice
       : null;
-  // Buys receive tokens (assumed decimals); sells receive SOL (exact 9 dp).
+  // Buys receive tokens (real decimals when known); sells receive SOL (exact 9 dp).
+  const effectiveDecimals = tokenDecimals ?? ASSUMED_DECIMALS;
   const estimatedTokens =
     side === "buy" && quote?.out_amount != null
-      ? Number(quote.out_amount) / 10 ** ASSUMED_DECIMALS
+      ? Number(quote.out_amount) / 10 ** effectiveDecimals
       : null;
   const estimatedSol =
     side === "sell" && quote?.out_amount != null
@@ -263,10 +285,11 @@ function ExecuteContent() {
               <span className="text-muted-foreground">Route</span>
               <span>{quote.route_labels.filter(Boolean).join(" → ") || "—"}</span>
             </div>
-            {side === "buy" && (
+            {side === "buy" && tokenDecimals === null && (
               <p className="pt-1 text-[10px] text-muted-foreground">
-                Token amount assumes {ASSUMED_DECIMALS} decimals — verify the
-                exact amount in your wallet before signing.
+                Token amount assumes {ASSUMED_DECIMALS} decimals (lookup
+                unavailable) — verify the exact amount in your wallet before
+                signing.
               </p>
             )}
           </div>

@@ -129,8 +129,9 @@ visible value early.
   prefilling the Execute ticket, ✅ confirmation-checker beat task
   (submitted -> confirmed/failed via batched getSignatureStatuses;
   expires never-landed txs after 15 min; `SOLANA_RPC_URL` config).
-  Still pending: priority-fee UI, Jito MEV protection, real token
-  decimals lookup on the ticket.
+  ✅ Real token-decimals lookup (RPC getTokenSupply, day-cached; ticket
+  falls back to the 6-dp assumption with its caveat only when the
+  lookup fails). Still pending: priority-fee UI, Jito MEV protection.
 - Execute page: swap ticket + open positions; Portfolio: real holdings +
   PnL from `ExecutedTrade`.
 - Record executed trades with the risk-context columns already in the
@@ -179,8 +180,9 @@ within its caps, and stops itself when the daily loss cap is hit.
   audit, tighten CORS, penetration pass on auth + subscription endpoints,
   Helius webhook secret enforcement verification (code exists).
 - **Observability:** ✅ Sentry release tagging (deploy SHA + environment);
-  still open: uptime checks on `/health` + `/health/pipeline`, Celery task
-  failure alerting, structured logging.
+  ✅ Celery task-failure alerting (Sentry CeleryIntegration in the
+  worker/beat processes, release + environment tagged); still open:
+  uptime checks on `/health` + `/health/pipeline`, structured logging.
 - **Performance debt:** ✅ per-request observability COUNTs now sampled
   1-in-20; still open: leaderboard cache warming, DB index review against
   real query plans.
