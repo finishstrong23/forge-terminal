@@ -69,6 +69,26 @@ test.describe("Execute", () => {
     await expect(page.getByText(/Jupiter quote unavailable/)).toBeVisible();
   });
 
+  test("real decimals reshape the estimate and drop the caveat", async ({ page }) => {
+    await page.route("**/api/v1/execute/price", (route) =>
+      fulfillJson(route, { sol_usd: 150 }),
+    );
+    await page.route("**/api/v1/execute/token-meta*", (route) =>
+      fulfillJson(route, { mint: MINT, decimals: 9 }),
+    );
+    await page.route("**/api/v1/execute/quote*", (route) =>
+      fulfillJson(route, QUOTE),
+    );
+    await page.goto("/execute");
+
+    await page.getByLabel("Token mint address").fill(MINT);
+    await page.getByLabel("Amount (SOL)").fill("0.5");
+
+    // out_amount 123456789000 at 9 decimals = 123.46, not 123,456.79.
+    await expect(page.getByText(/123\.46 tokens/)).toBeVisible();
+    await expect(page.getByText(/assumes 6 decimals/)).not.toBeVisible();
+  });
+
   test("mint query param prefills the ticket (Buy button flow)", async ({ page }) => {
     await page.route("**/api/v1/execute/price", (route) =>
       fulfillJson(route, { sol_usd: 150 }),

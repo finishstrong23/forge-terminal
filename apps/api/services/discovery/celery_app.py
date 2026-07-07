@@ -18,6 +18,21 @@ import os
 from celery import Celery
 from celery.schedules import crontab
 
+# Task failures should reach Sentry, not just worker logs (M5 alerting).
+# CeleryIntegration hooks task_failure; release/environment match the API.
+_SENTRY_DSN = os.getenv("SENTRY_DSN")
+if _SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.celery import CeleryIntegration
+
+    sentry_sdk.init(
+        dsn=_SENTRY_DSN,
+        integrations=[CeleryIntegration()],
+        traces_sample_rate=0.05,
+        release=os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA"),
+        environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
+    )
+
 # Read Redis URL from environment (same as config.py)
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CELERY_ALWAYS_EAGER = os.getenv("CELERY_ALWAYS_EAGER", "false").lower() == "true"

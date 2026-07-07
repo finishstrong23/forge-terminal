@@ -34,6 +34,22 @@ async function parseOrThrow<T>(response: Response, what: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** Mint decimals from the backend lookup; null = unknown (UI falls back
+ * to the 6-decimals assumption with its caveat). */
+export async function fetchTokenDecimals(mint: string): Promise<number | null> {
+  try {
+    const response = await fetch(
+      apiUrl(`/api/v1/execute/token-meta?mint=${encodeURIComponent(mint)}`),
+      { cache: "no-store" },
+    );
+    if (!response.ok) return null;
+    const body = (await response.json()) as { decimals: number | null };
+    return typeof body.decimals === "number" ? body.decimals : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchSolPrice(): Promise<number> {
   const response = await fetch(apiUrl("/api/v1/execute/price"), { cache: "no-store" });
   const body = await parseOrThrow<{ sol_usd: number }>(response, "price");

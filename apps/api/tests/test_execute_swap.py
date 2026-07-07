@@ -97,3 +97,28 @@ def test_record_and_list_manual_trades(client, db, auth, monkeypatch):
     # Manual trades don't leak into the copy-shadow ledger.
     r = client.get("/api/v1/copy/trades", headers=auth)
     assert r.json()["count"] == 0
+
+
+# ---------- token metadata (M3 follow-up: real decimals) ----------
+
+def test_token_meta_null_when_lookup_unavailable(client, db):
+    # conftest stubs the RPC fetch to None.
+    r = client.get("/api/v1/execute/token-meta",
+                   params={"mint": "TokenMint111111111111111111111111111111111"})
+    assert r.status_code == 200
+    assert r.json() == {"mint": "TokenMint111111111111111111111111111111111",
+                        "decimals": None}
+
+
+def test_token_meta_returns_decimals(client, db, monkeypatch):
+    monkeypatch.setattr(
+        "services.execution.token_meta.fetch_token_decimals", lambda mint: 9
+    )
+    r = client.get("/api/v1/execute/token-meta",
+                   params={"mint": "TokenMint111111111111111111111111111111111"})
+    assert r.status_code == 200 and r.json()["decimals"] == 9
+
+
+def test_token_meta_validates_mint(client, db):
+    assert client.get("/api/v1/execute/token-meta",
+                      params={"mint": "short"}).status_code == 422
