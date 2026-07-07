@@ -48,11 +48,10 @@ Known-suspect list, most likely first:
 5. **CORS.** `core/config.py` must allow the real Vercel domain(s),
    including preview URLs if we want previews to hit prod.
 
-**Build item (small, this repo):** a pipeline-liveness endpoint —
-`GET /health/pipeline` reporting last webhook event time, last beat-task
-completion per task, queue depth, Redis reachability. Turns "nothing
-works" into a diagnosable dashboard, and gives uptime monitors something
-meaningful to probe.
+**Build item (small, this repo):** ✅ built — `GET /health/pipeline`
+reports last webhook event time, unprocessed backlog, last-scored-token
+freshness, Redis state, and per-beat-task heartbeat staleness. Turns
+"nothing works" into a diagnosable dashboard; point uptime monitors at it.
 
 **Exit test:** the production Discovery page shows tokens < 5 minutes old
 with a LIVE badge; `/health/pipeline` is green on every subsystem.

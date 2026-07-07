@@ -260,11 +260,13 @@ def aggregate_metric_snapshots():
     Periodic task: aggregate metric snapshots for active tokens.
     Runs every 5 minutes via Celery Beat.
     """
+    from core.heartbeat import beat
     from services.discovery.metrics_aggregator import aggregate_active_tokens
 
     db = _get_db()
     try:
         count = aggregate_active_tokens(db)
+        beat("aggregate_metric_snapshots")
         return {"status": "completed", "snapshots_created": count}
     except Exception as exc:
         db.rollback()
@@ -283,12 +285,14 @@ def score_wallets():
     copy-intelligence leaderboard (30d window).
     Runs every 15 minutes via Celery Beat.
     """
+    from core.heartbeat import beat
     from services.copy.wallet_scoring import score_and_persist_wallets
 
     db = _get_db()
     try:
         result = score_and_persist_wallets(db)
         db.commit()
+        beat("score_wallets")
         return {"status": "completed", **result}
     except Exception as exc:
         db.rollback()
@@ -306,12 +310,14 @@ def record_shadow_trades():
     Runs every 60 seconds via Celery Beat (15-min rescan window; the unique
     shadow signature makes reruns idempotent).
     """
+    from core.heartbeat import beat
     from services.copy.shadow_recorder import record_shadow_trades as _record
 
     db = _get_db()
     try:
         result = _record(db)
         db.commit()
+        beat("record_shadow_trades")
         return {"status": "completed", **result}
     except Exception as exc:
         db.rollback()
@@ -331,7 +337,13 @@ def discover_new_tokens():
     """
     import asyncio
     import os
+    from core.heartbeat import beat
     from services.discovery.token_discovery import poll_new_tokens, process_discovered_tokens
+
+    # Heartbeat on every scheduled execution (including disabled/no-op runs):
+    # it answers "is beat firing this task", while /health/pipeline's data
+    # freshness answers "is anything being found".
+    beat("discover_new_tokens")
 
     if os.getenv("DISCOVERY_ENABLED", "true").lower() != "true":
         return {"status": "disabled"}
@@ -409,11 +421,13 @@ def send_email_digest(frequency: str = "hourly"):
     Periodic task: send batched email digest of alerts.
     Runs hourly via Celery Beat.
     """
+    from core.heartbeat import beat
     from services.discovery.alert_service import send_digest_emails
 
     db = _get_db()
     try:
         count = send_digest_emails(db, frequency)
+        beat("send_email_digest")
         return {"status": "completed", "emails_sent": count}
     except Exception as exc:
         db.rollback()
