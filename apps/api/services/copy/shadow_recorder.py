@@ -13,12 +13,12 @@ Each activity produces one ExecutedTrade per subscription, either:
   blacklist, honeypot flag, wallet sustainability below the subscription's
   threshold). Recording skips makes the filters visible in the ledger.
 
-Filters applied in v1: token_blacklist, honeypot (latest TokenSignal),
+Filters applied: token_blacklist, honeypot (latest TokenSignal),
 min_sustainability_score (persisted Wallet score; not applied until the
-wallet has been scored). max_position_usd and daily_loss_cap_usd need a
-SOL/USD price source we don't ingest yet — they are stored on the
-subscription and enforced at execution time (Phase 3); usd_value stays
-NULL on shadow rows for the same reason.
+wallet has been scored), and max_position_usd (M3 price feed: usd_value =
+sol_amount * SOL/USD; when the price feed is down, rows record with NULL
+usd_value and the USD cap is not enforced — availability over false
+blocking). daily_loss_cap_usd still applies at live execution only.
 
 Idempotency: signature = "shadow:{subscription_id}:{event_signature}" is
 unique on executed_trades, so the beat task can rescan a lookback window
@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from models.token import TokenSignal
 from models.trade import CopySubscription, ExecutedTrade
 from models.wallet import Wallet, WalletActivity
+from services.execution.price_feed import get_sol_price_usd
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ def _skip_reason(
     activity: WalletActivity,
     signal: Optional[TokenSignal],
     wallet_score: Optional[float],
+    usd_value: Optional[float],
 ) -> Optional[str]:
     if sub.token_blacklist and activity.token_address in sub.token_blacklist:
         return "token blacklisted by subscription"
@@ -81,6 +83,14 @@ def _skip_reason(
         return (
             f"wallet sustainability {wallet_score:.1f} below "
             f"threshold {sub.min_sustainability_score:.1f}"
+        )
+    if (
+        sub.max_position_usd is not None
+        and usd_value is not None
+        and usd_value > sub.max_position_usd
+    ):
+        return (
+            f"position ${usd_value:.2f} exceeds cap ${sub.max_position_usd:.2f}"
         )
     return None
 
@@ -128,6 +138,8 @@ def record_shadow_trades(
         .filter(Wallet.address.in_(list(subs_by_wallet)))
         .all()
     }
+    # One price lookup per run; None means USD caps can't be enforced this run.
+    sol_price = get_sol_price_usd()
 
     # One IN query resolves which candidate rows already exist.
     candidates = []
@@ -156,7 +168,14 @@ def record_shadow_trades(
             continue
 
         signal = signals.get(activity.token_address)
-        reason = _skip_reason(sub, activity, signal, scores.get(sub.wallet_address))
+        usd_value = (
+            round(activity.sol_amount * sol_price, 2)
+            if activity.sol_amount is not None and sol_price is not None
+            else None
+        )
+        reason = _skip_reason(
+            sub, activity, signal, scores.get(sub.wallet_address), usd_value
+        )
         db.add(
             ExecutedTrade(
                 user_id=sub.user_id,
@@ -164,6 +183,7 @@ def record_shadow_trades(
                 trade_type=activity.activity_type,
                 source="copy_shadow",
                 sol_amount=activity.sol_amount,
+                usd_value=usd_value,
                 price_at_trade=signal.price_usd if signal else None,
                 signature=sig,
                 status="skipped" if reason else "simulated",

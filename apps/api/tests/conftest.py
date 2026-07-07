@@ -27,6 +27,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pytest  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _no_live_prices(monkeypatch):
+    """CI runners have real internet — price lookups must be deterministic.
+
+    Tests that need a price monkeypatch the consumer (e.g.
+    services.copy.shadow_recorder.get_sol_price_usd) to a fixed value.
+    """
+    monkeypatch.setattr(
+        "services.execution.price_feed.fetch_sol_price_usd", lambda: None
+    )
+
+
 @pytest.fixture()
 def db():
     """A session against a freshly recreated schema."""

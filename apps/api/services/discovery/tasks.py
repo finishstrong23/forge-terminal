@@ -327,6 +327,24 @@ def record_shadow_trades():
         db.close()
 
 
+# ==================== EXECUTION ====================
+
+@celery_app.task(name="tasks.refresh_sol_price")
+def refresh_sol_price():
+    """
+    Periodic task: refresh the cached SOL/USD price.
+    Runs every 60 seconds via Celery Beat.
+    """
+    from core.heartbeat import beat
+    from services.execution.price_feed import refresh_sol_price as _refresh
+
+    price = _refresh()
+    beat("refresh_sol_price")
+    if price is None:
+        return {"status": "no_price"}
+    return {"status": "completed", "sol_usd": price}
+
+
 # ==================== TOKEN DISCOVERY ====================
 
 @celery_app.task(name="tasks.discover_new_tokens")
