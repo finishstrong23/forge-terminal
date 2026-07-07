@@ -156,6 +156,31 @@ test.describe("Portfolio", () => {
     await expect(page.getByText("token flagged as honeypot")).toBeVisible();
   });
 
+  test("Copy button on a simulated buy prefills the Execute ticket", async ({ page }) => {
+    await signIn(page);
+    await page.route("**/api/v1/copy/subscriptions*", (route) =>
+      fulfillJson(route, { subscriptions: [SUB], count: 1 }),
+    );
+    await page.route("**/api/v1/copy/trades*", (route) =>
+      fulfillJson(route, { trades: TRADES, count: 2 }),
+    );
+    await page.route("**/api/v1/execute/price", (route) =>
+      fulfillJson(route, { sol_usd: 150 }),
+    );
+    await page.goto("/portfolio");
+
+    // Only the simulated buy row gets a Copy button (skipped rows don't).
+    const copyLinks = page.getByRole("link", { name: "Copy", exact: true });
+    await expect(copyLinks).toHaveCount(1);
+    await copyLinks.click();
+
+    await expect(page).toHaveURL(/\/execute\?mint=.*side=buy.*amount=2\.5/);
+    await expect(page.getByLabel("Token mint address")).toHaveValue(
+      TRADES[0].token_address,
+    );
+    await expect(page.getByLabel("Amount (SOL)")).toHaveValue("2.5");
+  });
+
   test("pause action patches the subscription", async ({ page }) => {
     await signIn(page);
     const patched: string[] = [];
