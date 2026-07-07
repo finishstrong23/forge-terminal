@@ -1,6 +1,7 @@
 "use client";
 
 import React, { Suspense, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { ExternalLink, Zap } from "lucide-react";
 import { VersionedTransaction } from "@solana/web3.js";
@@ -330,7 +331,11 @@ function ExecuteContent() {
         </Button>
         <p className="text-[10px] text-muted-foreground">
           You sign in your own wallet; Forge never holds keys or funds. Quotes
-          via Jupiter.
+          via Jupiter. Trading is high-risk — read the{" "}
+          <Link href="/disclaimer" className="underline hover:text-foreground">
+            Risk Disclosure
+          </Link>
+          .
         </p>
       </div>
     </div>
