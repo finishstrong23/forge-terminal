@@ -1,6 +1,6 @@
 # Forge Terminal — Launch Roadmap
 
-Last updated: 2026-07-07 (PR #1 era). This is the working plan from "code
+Last updated: 2026-07-07. Launch verification lives in [TESTING.md](./TESTING.md). This is the working plan from "code
 exists" to "people pay for it." Milestones are ordered by dependency, not
 calendar. Each has an explicit exit test — a milestone isn't done until its
 exit test passes in **production**, not localhost.
