@@ -38,6 +38,10 @@ def _no_live_prices(monkeypatch):
         "services.execution.price_feed.fetch_sol_price_usd", lambda: None
     )
     monkeypatch.setattr(
+        "services.execution.price_feed.fetch_token_prices_usd",
+        lambda mints: {mint: None for mint in mints},
+    )
+    monkeypatch.setattr(
         "services.execution.token_meta.fetch_token_decimals", lambda mint: None
     )
 

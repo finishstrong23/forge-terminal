@@ -6,6 +6,7 @@ GET  /api/v1/execute/quote             — Jupiter swap quote (SOL input, v1)
 POST /api/v1/execute/swap-transaction  — build unsigned swap tx (signed client-side)
 POST /api/v1/execute/trades            — record a user-signed manual swap (auth)
 GET  /api/v1/execute/trades            — the caller's manual trades (auth)
+GET  /api/v1/execute/positions         — per-token holdings + PnL (auth)
 
 The server never holds keys and never submits transactions: it quotes and
 builds; the user's wallet signs and sends. Recording is client-reported
@@ -20,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from models.token import TokenSignal
 from models.trade import ExecutedTrade
 from models.user import User
 from routes.auth import get_current_user
@@ -149,6 +151,9 @@ class ManualTradeCreate(BaseModel):
     token_address: str = Field(min_length=1)
     trade_type: Literal["buy", "sell"] = "buy"
     sol_amount: float = Field(gt=0)
+    # Quoted token quantity (received on buys, spent on sells). Optional so
+    # older clients keep working; positions need it for quantity math.
+    token_amount: Optional[float] = Field(None, gt=0)
     signature: str = Field(min_length=32, max_length=128)
     slippage_bps: Optional[int] = Field(None, ge=1, le=5_000)
 
@@ -161,11 +166,14 @@ class ManualTradeResponse(BaseModel):
     trade_type: str
     source: str
     sol_amount: Optional[float] = None
+    token_amount: Optional[float] = None
     usd_value: Optional[float] = None
     slippage_pct: Optional[float] = None
     signature: Optional[str] = None
     status: str
     error_message: Optional[str] = None
+    rug_risk_at_trade: Optional[float] = None
+    momentum_at_trade: Optional[float] = None
     executed_at: Optional[datetime] = None
     created_at: datetime
 
@@ -195,16 +203,28 @@ def record_manual_trade(
         raise HTTPException(status_code=409, detail="Trade already recorded")
 
     sol_price = price_feed.get_sol_price_usd()
+    # Risk context at the moment of the trade (ROADMAP M3): the latest
+    # scored signal for this mint, if discovery has seen it.
+    latest_signal = (
+        db.query(TokenSignal.rug_risk_score, TokenSignal.momentum_score)
+        .filter(TokenSignal.token_address == body.token_address)
+        .order_by(TokenSignal.scan_timestamp.desc())
+        .first()
+    )
     trade = ExecutedTrade(
         user_id=current_user.id,
         token_address=body.token_address,
         trade_type=body.trade_type,
         source="manual",
         sol_amount=body.sol_amount,
+        token_amount=body.token_amount,
         usd_value=round(body.sol_amount * sol_price, 2) if sol_price else None,
+        price_at_trade=sol_price,
         slippage_pct=(body.slippage_bps / 100.0) if body.slippage_bps else None,
         signature=body.signature,
         status="submitted",
+        rug_risk_at_trade=latest_signal.rug_risk_score if latest_signal else None,
+        momentum_at_trade=latest_signal.momentum_score if latest_signal else None,
         executed_at=datetime.now(timezone.utc),
     )
     db.add(trade)
@@ -235,3 +255,69 @@ def list_manual_trades(
         trades=[ManualTradeResponse.model_validate(t) for t in trades],
         count=len(trades),
     )
+
+
+class Position(BaseModel):
+    token_address: str
+    trade_count: int
+    last_trade_at: Optional[datetime] = None
+    bought_sol: float
+    sold_sol: float
+    net_tokens: Optional[float] = None
+    cost_basis_sol: Optional[float] = None
+    realized_pnl_sol: Optional[float] = None
+    token_price_usd: Optional[float] = None
+    value_sol: Optional[float] = None
+    unrealized_pnl_sol: Optional[float] = None
+
+
+class PositionsResponse(BaseModel):
+    positions: List[Position]
+    count: int
+    sol_usd: Optional[float] = None
+
+
+@router.get("/positions", response_model=PositionsResponse)
+def list_positions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PositionsResponse:
+    """
+    Per-token holdings + PnL from the caller's real trades (submitted or
+    confirmed). Quantities/PnL are None wherever the inputs aren't knowable
+    (legacy rows without token_amount, price feed down) — the UI shows a
+    dash instead of a guess.
+    """
+    from services.execution.positions import compute_positions
+
+    rows = compute_positions(db, current_user.id)
+
+    sol_usd = price_feed.get_sol_price_usd()
+    open_mints = [
+        r["token_address"] for r in rows
+        if r["net_tokens"] is not None and r["net_tokens"] > 0
+    ]
+    token_prices = price_feed.get_token_prices_usd(open_mints) if open_mints else {}
+
+    positions = []
+    for r in rows:
+        price_usd = token_prices.get(r["token_address"])
+        value_sol = unrealized = None
+        if (
+            price_usd is not None
+            and sol_usd
+            and r["net_tokens"] is not None
+            and r["net_tokens"] > 0
+        ):
+            value_sol = r["net_tokens"] * price_usd / sol_usd
+            if r["cost_basis_sol"] is not None:
+                unrealized = value_sol - r["cost_basis_sol"]
+        positions.append(
+            Position(
+                **r,
+                token_price_usd=price_usd,
+                value_sol=value_sol,
+                unrealized_pnl_sol=unrealized,
+            )
+        )
+    return PositionsResponse(positions=positions, count=len(positions), sol_usd=sol_usd)

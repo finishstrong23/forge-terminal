@@ -63,12 +63,37 @@ const TRADES = [
   },
 ];
 
+const POSITION = {
+  token_address: "Token1111111111111111111111111111111111111",
+  trade_count: 3,
+  last_trade_at: new Date().toISOString(),
+  bought_sol: 3.0,
+  sold_sol: 1.5,
+  net_tokens: 1500,
+  cost_basis_sol: 2.25,
+  realized_pnl_sol: 0.75,
+  token_price_usd: 0.5,
+  value_sol: 5.0,
+  unrealized_pnl_sol: 2.75,
+};
+
 async function fulfillJson(route: Route, body: unknown) {
   return route.fulfill({
     status: 200,
     contentType: "application/json",
     body: JSON.stringify(body),
   });
+}
+
+/** Portfolio's refresh() also fetches positions; default to none. */
+async function mockPositions(
+  page: Page,
+  positions: (typeof POSITION)[] = [],
+  solUsd: number | null = null,
+) {
+  await page.route("**/api/v1/execute/positions", (route) =>
+    fulfillJson(route, { positions, count: positions.length, sol_usd: solUsd }),
+  );
 }
 
 /** Signed-in state: token pre-seeded, /auth/me mocked. */
@@ -138,6 +163,7 @@ test.describe("Portfolio", () => {
 
   test("signed in renders follows and shadow ledger", async ({ page }) => {
     await signIn(page);
+    await mockPositions(page);
     await page.route("**/api/v1/copy/subscriptions*", (route) =>
       fulfillJson(route, { subscriptions: [SUB], count: 1 }),
     );
@@ -154,10 +180,34 @@ test.describe("Portfolio", () => {
     await expect(page.getByText("SIMULATED")).toBeVisible();
     await expect(page.getByText("SKIPPED")).toBeVisible();
     await expect(page.getByText("token flagged as honeypot")).toBeVisible();
+
+    // No executed trades in this scenario -> positions empty state.
+    await expect(page.getByText(/No executed trades yet/)).toBeVisible();
+  });
+
+  test("positions table shows holdings and PnL", async ({ page }) => {
+    await signIn(page);
+    await mockPositions(page, [POSITION], 100);
+    await page.route("**/api/v1/copy/subscriptions*", (route) =>
+      fulfillJson(route, { subscriptions: [], count: 0 }),
+    );
+    await page.route("**/api/v1/copy/trades*", (route) =>
+      fulfillJson(route, { trades: [], count: 0 }),
+    );
+    await page.goto("/portfolio");
+
+    await expect(page.getByText("Positions")).toBeVisible();
+    await expect(page.getByText("1,500")).toBeVisible(); // holding
+    await expect(page.getByText("2.250 SOL")).toBeVisible(); // cost basis
+    await expect(page.getByText("5.000 SOL")).toBeVisible(); // value
+    await expect(page.getByText("(≈ $500.00)")).toBeVisible(); // USD conversion
+    await expect(page.getByText("+2.750 SOL")).toBeVisible(); // unrealized
+    await expect(page.getByText("+0.750 SOL")).toBeVisible(); // realized
   });
 
   test("Copy button on a simulated buy prefills the Execute ticket", async ({ page }) => {
     await signIn(page);
+    await mockPositions(page);
     await page.route("**/api/v1/copy/subscriptions*", (route) =>
       fulfillJson(route, { subscriptions: [SUB], count: 1 }),
     );
@@ -183,6 +233,7 @@ test.describe("Portfolio", () => {
 
   test("pause action patches the subscription", async ({ page }) => {
     await signIn(page);
+    await mockPositions(page);
     const patched: string[] = [];
     await page.route("**/api/v1/copy/subscriptions*", (route) =>
       fulfillJson(route, { subscriptions: [SUB], count: 1 }),

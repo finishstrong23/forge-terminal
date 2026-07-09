@@ -100,6 +100,9 @@ export async function recordManualTrade(input: {
   token_address: string;
   trade_type: "buy" | "sell";
   sol_amount: number;
+  /** Quoted token quantity — received on buys, spent on sells. Feeds
+   * position quantity/PnL math; omit when unknown. */
+  token_amount?: number;
   signature: string;
   slippage_bps?: number;
 }): Promise<void> {
@@ -112,6 +115,34 @@ export async function recordManualTrade(input: {
   if (!response.ok && response.status !== 409) {
     throw new Error(`trade recording failed: HTTP ${response.status}`);
   }
+}
+
+export interface ApiPosition {
+  token_address: string;
+  trade_count: number;
+  last_trade_at: string | null;
+  bought_sol: number;
+  sold_sol: number;
+  net_tokens: number | null;
+  cost_basis_sol: number | null;
+  realized_pnl_sol: number | null;
+  token_price_usd: number | null;
+  value_sol: number | null;
+  unrealized_pnl_sol: number | null;
+}
+
+export interface PositionsResponse {
+  positions: ApiPosition[];
+  count: number;
+  sol_usd: number | null;
+}
+
+export async function fetchPositions(): Promise<PositionsResponse> {
+  const response = await fetch(apiUrl("/api/v1/execute/positions"), {
+    cache: "no-store",
+    headers: authHeaders(),
+  });
+  return parseOrThrow<PositionsResponse>(response, "positions");
 }
 
 /** Decode Jupiter's base64 transaction without relying on Buffer polyfills. */
