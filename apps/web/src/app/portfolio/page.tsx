@@ -14,6 +14,7 @@ import {
   patchSubscription,
   type SubscriptionAction,
 } from "@/lib/copy-subscriptions";
+import { fetchPositions, type ApiPosition } from "@/lib/execute";
 import { cn, truncateAddress } from "@/lib/utils";
 import type { ApiCopySubscription, ApiShadowTrade } from "@/lib/types";
 
@@ -22,6 +23,21 @@ const STATUS_BADGE: Record<string, string> = {
   paused: "text-amber-400 border-amber-400/40",
   stopped: "text-muted-foreground border-border",
 };
+
+function formatSol(value: number | null): string {
+  if (value === null) return "—";
+  return `${value.toFixed(3)} SOL`;
+}
+
+function PnlCell({ value }: { value: number | null }) {
+  if (value === null) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className={value >= 0 ? "text-green-400" : "text-red-400"}>
+      {value >= 0 ? "+" : ""}
+      {value.toFixed(3)} SOL
+    </span>
+  );
+}
 
 function SignedOut() {
   return (
@@ -45,6 +61,8 @@ export default function PortfolioPage() {
   const { user, loading: authLoading } = useAuth();
   const [subs, setSubs] = useState<ApiCopySubscription[]>([]);
   const [trades, setTrades] = useState<ApiShadowTrade[]>([]);
+  const [positions, setPositions] = useState<ApiPosition[]>([]);
+  const [solUsd, setSolUsd] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -52,12 +70,15 @@ export default function PortfolioPage() {
   const refresh = useCallback(async () => {
     setError(null);
     try {
-      const [subsResult, tradesResult] = await Promise.all([
+      const [subsResult, tradesResult, positionsResult] = await Promise.all([
         listSubscriptions(),
         listShadowTrades(),
+        fetchPositions(),
       ]);
       setSubs(subsResult.subscriptions);
       setTrades(tradesResult.trades);
+      setPositions(positionsResult.positions);
+      setSolUsd(positionsResult.sol_usd);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -194,6 +215,77 @@ export default function PortfolioPage() {
                           </Button>
                         )}
                       </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold text-foreground">Positions</h2>
+        {loading ? (
+          <Skeleton className="h-24 w-full rounded-md" />
+        ) : positions.length === 0 ? (
+          <div className="rounded-lg border border-border bg-surface px-4 py-6 text-center text-xs text-muted-foreground">
+            No executed trades yet — swap something on the{" "}
+            <Link href="/execute" className="text-accent hover:underline">
+              Execute
+            </Link>{" "}
+            page and it lands here.
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-surface text-left text-xs text-muted-foreground">
+                  <th className="px-3 py-2">Token</th>
+                  <th className="px-3 py-2">Trades</th>
+                  <th className="px-3 py-2">Holding</th>
+                  <th className="px-3 py-2">Cost</th>
+                  <th className="px-3 py-2">Value</th>
+                  <th className="px-3 py-2">Unrealized</th>
+                  <th className="px-3 py-2">Realized</th>
+                  <th className="px-3 py-2">Last trade</th>
+                </tr>
+              </thead>
+              <tbody>
+                {positions.map((p) => (
+                  <tr key={p.token_address} className="border-b border-border-muted">
+                    <td className="px-3 py-2 font-mono text-xs">
+                      {truncateAddress(p.token_address, 4)}
+                    </td>
+                    <td className="px-3 py-2 font-mono-numbers text-xs text-muted-foreground">
+                      {p.trade_count}
+                    </td>
+                    <td className="px-3 py-2 font-mono-numbers text-xs">
+                      {p.net_tokens !== null
+                        ? p.net_tokens.toLocaleString(undefined, {
+                            maximumFractionDigits: 2,
+                          })
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-2 font-mono-numbers text-xs text-muted-foreground">
+                      {formatSol(p.cost_basis_sol)}
+                    </td>
+                    <td className="px-3 py-2 font-mono-numbers text-xs">
+                      {formatSol(p.value_sol)}
+                      {p.value_sol !== null && solUsd !== null && (
+                        <span className="ml-1 text-muted-foreground">
+                          (≈ ${(p.value_sol * solUsd).toFixed(2)})
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 font-mono-numbers text-xs">
+                      <PnlCell value={p.unrealized_pnl_sol} />
+                    </td>
+                    <td className="px-3 py-2 font-mono-numbers text-xs">
+                      <PnlCell value={p.realized_pnl_sol} />
+                    </td>
+                    <td className="px-3 py-2 font-mono-numbers text-xs text-muted-foreground">
+                      {p.last_trade_at ? formatRelativeTime(p.last_trade_at) : "—"}
                     </td>
                   </tr>
                 ))}

@@ -132,10 +132,20 @@ function ExecuteContent() {
           side === "buy"
             ? parseFloat(amountSol)
             : Number(quote.out_amount ?? 0) / 1e9;
+        // Token quantity for position math: quoted tokens received on
+        // buys (skipped while decimals are the 6-dp guess), typed tokens
+        // on sells.
+        const tokenAmount =
+          side === "buy"
+            ? quote.out_amount != null && tokenDecimals !== null
+              ? Number(quote.out_amount) / 10 ** tokenDecimals
+              : undefined
+            : parseFloat(amountSol) || undefined;
         void recordManualTrade({
           token_address: side === "buy" ? quote.output_mint : quote.input_mint,
           trade_type: side,
           sol_amount: solAmount,
+          token_amount: tokenAmount,
           signature,
           slippage_bps: slippageBps,
         }).catch(() => undefined);
@@ -145,7 +155,7 @@ function ExecuteContent() {
     } finally {
       setSwapping(false);
     }
-  }, [quote, publicKey, sendTransaction, connection, user, amountSol, slippageBps, side]);
+  }, [quote, publicKey, sendTransaction, connection, user, amountSol, slippageBps, side, tokenDecimals]);
 
   const amount = parseFloat(amountSol);
   const usdEstimate =

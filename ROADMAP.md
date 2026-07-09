@@ -119,7 +119,8 @@ visible value early.
   Redis-cached, refreshed by a 60s beat task (heartbeat-monitored),
   `GET /api/v1/execute/price`. `max_position_usd` is now ENFORCED in
   shadow mode (usd_value stamped on ledger rows; cap skips carry a
-  reason). Token-level price feed + daily loss cap still pending.
+  reason). ✅ Token-level prices (Jupiter batch lookup, request-driven,
+  60s cache) mark open positions to market. Daily loss cap still pending.
 - ✅ **Manual swaps (buy-side v1):** Execute page swap ticket — live
   Jupiter quote (price impact, route), slippage presets, swap tx built
   server-side (`POST /execute/swap-transaction`, keys never leave the
@@ -132,10 +133,14 @@ visible value early.
   ✅ Real token-decimals lookup (RPC getTokenSupply, day-cached; ticket
   falls back to the 6-dp assumption with its caveat only when the
   lookup fails). Still pending: priority-fee UI, Jito MEV protection.
-- Execute page: swap ticket + open positions; Portfolio: real holdings +
-  PnL from `ExecutedTrade`.
-- Record executed trades with the risk-context columns already in the
-  model (`rug_risk_at_trade`, `momentum_at_trade`).
+- ✅ **Positions + PnL:** `GET /api/v1/execute/positions` aggregates real
+  trades (submitted/confirmed; shadow + failed rows excluded) per token —
+  average-cost basis, realized PnL, and mark-to-market unrealized PnL in
+  SOL, rendered on Portfolio. Quantities degrade to "—" rather than
+  guessing when a legacy row lacks `token_amount` or prices are down.
+- ✅ Executed trades now record risk context at trade time
+  (`rug_risk_at_trade`, `momentum_at_trade` from the latest scored
+  signal) plus `token_amount` and `price_at_trade`.
 
 **Exit test:** a user swaps SOL→token from the terminal with their own
 wallet and sees the position + PnL in Portfolio.
