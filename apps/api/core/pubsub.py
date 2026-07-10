@@ -40,7 +40,7 @@ def publish_token_update(signal) -> None:
     TODO(scaling): cache Redis publisher at module level if connection overhead becomes measurable.
     """
     payload = TokenFeedItem.from_signal(signal).model_dump_json()
-    client = redis.from_url(REDIS_URL, socket_connect_timeout=10, socket_timeout=10)
+    client = redis.from_url(REDIS_URL, socket_connect_timeout=30, socket_timeout=30, retry_on_timeout=True)
     try:
         client.publish(DISCOVERY_CHANNEL, payload)
     finally:
@@ -72,7 +72,8 @@ async def subscribe_and_fanout() -> None:
         try:
             client = aioredis.from_url(
                 REDIS_URL,
-                socket_connect_timeout=10,
+                socket_connect_timeout=30,
+                retry_on_timeout=True,
                 # No socket_timeout: pubsub.listen() blocks indefinitely waiting for messages.
             )
             pubsub = client.pubsub()

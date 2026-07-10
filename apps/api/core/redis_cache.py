@@ -43,8 +43,9 @@ class RedisCache:
             self._client = redis.from_url(
                 REDIS_URL,
                 decode_responses=True,
-                socket_connect_timeout=10,
-                socket_timeout=10,
+                socket_connect_timeout=30,
+                socket_timeout=30,
+                retry_on_timeout=True,
             )
             self._client.ping()
             self._available = True
