@@ -7,6 +7,7 @@ Falls back gracefully to direct DB queries if Redis is unavailable.
 """
 import json
 import os
+import time
 from typing import Optional, Any, Callable
 from datetime import datetime, timezone
 
@@ -18,6 +19,11 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 # Cache TTLs (seconds)
 CACHE_SIGNALS_TTL = int(os.getenv("CACHE_SIGNALS_TTL", "30"))
 CACHE_STATS_TTL = int(os.getenv("CACHE_STATS_TTL", "60"))
+
+# With Redis down, retry the connection at most this often (per process) so
+# an outage heals without a restart but requests don't pay a connect attempt
+# on every call.
+RECONNECT_COOLDOWN_SECONDS = 30.0
 
 
 class RedisCache:
@@ -35,17 +41,18 @@ class RedisCache:
     def __init__(self):
         self._client: Optional[redis.Redis] = None
         self._available = False
+        self._last_connect_attempt = 0.0
         self._connect()
 
     def _connect(self):
         """Try to connect to Redis. If it fails, cache is disabled."""
+        self._last_connect_attempt = time.monotonic()
         try:
             self._client = redis.from_url(
                 REDIS_URL,
                 decode_responses=True,
-                socket_connect_timeout=30,
-                socket_timeout=30,
-                retry_on_timeout=True,
+                socket_connect_timeout=5,
+                socket_timeout=5,
             )
             self._client.ping()
             self._available = True
@@ -57,11 +64,17 @@ class RedisCache:
 
     @property
     def available(self) -> bool:
+        """Redis reachability; with a cooldown, retries a dead connection so
+        an outage heals without a process restart."""
+        if not self._available and (
+            time.monotonic() - self._last_connect_attempt >= RECONNECT_COOLDOWN_SECONDS
+        ):
+            self._connect()
         return self._available
 
     def get(self, key: str) -> Optional[Any]:
         """Get a cached value. Returns None on miss or if Redis is down."""
-        if not self._available:
+        if not self.available:
             return None
         try:
             raw = self._client.get(key)
@@ -73,7 +86,7 @@ class RedisCache:
 
     def set(self, key: str, value: Any, ttl: int = 30) -> bool:
         """Set a cached value with TTL. Returns False if Redis is down."""
-        if not self._available:
+        if not self.available:
             return False
         try:
             self._client.setex(key, ttl, json.dumps(value, default=str))
@@ -83,7 +96,7 @@ class RedisCache:
 
     def delete(self, key: str) -> bool:
         """Delete a cached key."""
-        if not self._available:
+        if not self.available:
             return False
         try:
             self._client.delete(key)
@@ -93,7 +106,7 @@ class RedisCache:
 
     def invalidate_pattern(self, pattern: str) -> int:
         """Delete all keys matching a pattern (e.g., 'signals:*')."""
-        if not self._available:
+        if not self.available:
             return 0
         try:
             keys = list(self._client.scan_iter(match=pattern, count=100))
@@ -128,7 +141,7 @@ class RedisCache:
         an auth endpoint must not lock users out because the limiter's
         backend is down.
         """
-        if not self._available or self._client is None:
+        if not self.available or self._client is None:
             return True
         try:
             count = self._client.incr(key)
@@ -140,7 +153,7 @@ class RedisCache:
 
     def health_check(self) -> dict:
         """Return Redis health status."""
-        if not self._available:
+        if not self.available:
             return {"status": "unavailable", "message": "Redis not connected"}
         try:
             self._client.ping()

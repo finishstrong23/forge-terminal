@@ -56,3 +56,17 @@ def test_heartbeat_helpers_never_raise_without_redis():
 def test_liveness_endpoint_still_works(client):
     r = client.get("/health")
     assert r.status_code == 200 and r.json()["database"] == "connected"
+
+
+def test_redis_debug_reports_failure_stage_without_secrets(client):
+    r = client.get("/health/redis-debug")
+    assert r.status_code == 200
+    body = r.json()
+    # conftest points REDIS_URL at 127.0.0.1:1 — DNS resolves, TCP refused.
+    assert body["url"]["host"] == "127.0.0.1"
+    assert body["dns"]["ok"] is True
+    assert all(t["ok"] is False for t in body["tcp"])
+    assert body["ping"]["ok"] is False and "error" in body["ping"]
+    # Password must never appear anywhere in the payload, only its length.
+    assert "password_length" in body["url"]
+    assert "password" not in str(body).replace("password_length", "")

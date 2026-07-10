@@ -10,9 +10,14 @@ GET /health/pipeline — M0 diagnostics: is the DATA PIPELINE alive? Reports
                        "task X hasn't run in Y minutes". Point uptime
                        monitors at this one.
 """
+import os
+import socket
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlparse
 
+import redis as redis_lib
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -183,3 +188,127 @@ def pipeline_health(db: Session = Depends(get_db)):
         "wallet_activity": wallet_activity,
         "beat_tasks": beat_report,
     }
+
+
+def _elapsed_ms(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
+
+
+def _family_name(family: int) -> str:
+    if family == socket.AF_INET6:
+        return "IPv6"
+    if family == socket.AF_INET:
+        return "IPv4"
+    return f"family-{family}"
+
+
+def _redis_env_summary() -> dict:
+    """Hosts/ports of every REDIS* env var, passwords masked to a length."""
+    out = {}
+    for name in sorted(os.environ):
+        if "REDIS" not in name.upper():
+            continue
+        value = os.environ[name]
+        parsed = urlparse(value)
+        if parsed.scheme and parsed.hostname:
+            out[name] = (
+                f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 6379}"
+                f" (password_length={len(parsed.password or '')})"
+            )
+        else:
+            out[name] = f"<non-url value, {len(value)} chars>"
+    return out
+
+
+@router.get("/health/redis-debug")
+def redis_debug():
+    """
+    TEMPORARY M0 triage: low-level Redis connectivity report from inside
+    this container. /health/pipeline can only say "not connected"; this
+    says WHERE it dies — DNS resolution, raw TCP per address family
+    (Railway private networking is IPv6-only, a classic mismatch), or
+    auth/protocol on an authenticated PING. Remove once the pipeline is
+    green. Secrets are masked (password length only).
+    """
+    raw_url = os.getenv("REDIS_URL", "")
+    parsed = urlparse(raw_url)
+    host, port = parsed.hostname, parsed.port or 6379
+
+    report: dict = {
+        "url": {
+            "set": bool(raw_url),
+            "scheme": parsed.scheme,
+            "host": host,
+            "host_repr": repr(host),  # exposes stray whitespace/quotes
+            "port": port,
+            "username": parsed.username,
+            "password_length": len(parsed.password or ""),
+        },
+        "redis_env_vars": _redis_env_summary(),
+    }
+    if not host:
+        report["dns"] = {"ok": False, "error": "REDIS_URL missing or unparseable"}
+        return report
+
+    # 1) DNS: does the hostname resolve, and to which address families?
+    resolved = []
+    started = time.monotonic()
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+        seen = set()
+        for family, _type, _proto, _canon, sockaddr in infos:
+            if (family, sockaddr[0]) in seen:
+                continue
+            seen.add((family, sockaddr[0]))
+            resolved.append({"family": family, "sockaddr": sockaddr})
+        report["dns"] = {
+            "ok": True,
+            "elapsed_ms": _elapsed_ms(started),
+            "addresses": [
+                {"family": _family_name(r["family"]), "address": r["sockaddr"][0]}
+                for r in resolved
+            ],
+        }
+    except Exception as exc:
+        report["dns"] = {
+            "ok": False,
+            "elapsed_ms": _elapsed_ms(started),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    # 2) Raw TCP connect to each resolved address (5s cap each).
+    tcp = []
+    for r in resolved:
+        sock = socket.socket(r["family"], socket.SOCK_STREAM)
+        sock.settimeout(5)
+        started = time.monotonic()
+        entry = {"family": _family_name(r["family"]), "address": r["sockaddr"][0]}
+        try:
+            sock.connect(r["sockaddr"])
+            entry.update(ok=True, elapsed_ms=_elapsed_ms(started))
+        except Exception as exc:
+            entry.update(
+                ok=False,
+                elapsed_ms=_elapsed_ms(started),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+        finally:
+            sock.close()
+        tcp.append(entry)
+    report["tcp"] = tcp
+
+    # 3) Full client PING: exercises auth + protocol on top of TCP.
+    started = time.monotonic()
+    try:
+        client = redis_lib.from_url(raw_url, socket_connect_timeout=5, socket_timeout=5)
+        pong = client.ping()
+        report["ping"] = {"ok": bool(pong), "elapsed_ms": _elapsed_ms(started)}
+        client.close()
+    except Exception as exc:
+        report["ping"] = {
+            "ok": False,
+            "elapsed_ms": _elapsed_ms(started),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    return report
