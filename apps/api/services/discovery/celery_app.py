@@ -15,8 +15,11 @@ Usage:
     celery -A services.discovery.celery_app worker --beat --loglevel=info --concurrency=2
 """
 import os
+from datetime import datetime, timezone
+
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import beat_init, task_failure, worker_ready
 
 # Task failures should reach Sentry, not just worker logs (M5 alerting).
 # CeleryIntegration hooks task_failure; release/environment match the API.
@@ -66,7 +69,50 @@ celery_app.conf.update(
     # Testing mode: run tasks synchronously in-process
     task_always_eager=CELERY_ALWAYS_EAGER,
     task_eager_propagates=CELERY_ALWAYS_EAGER,
+
+    # Survive a broker that's down at boot (e.g. Redis restarting) instead
+    # of exiting — Railway's ON_FAILURE restart cap can otherwise leave the
+    # process permanently stopped after a long outage.
+    broker_connection_retry_on_startup=True,
 )
+
+
+# --- process-level liveness + failure capture (M0 diagnostics) -----------
+# /health/celery-debug reads these to tell "process never started" apart
+# from "process runs but tasks fail" — without needing Railway log access.
+
+@worker_ready.connect
+def _mark_worker_ready(**_kwargs):
+    from core.heartbeat import beat as _heartbeat
+
+    _heartbeat("process:worker")
+
+
+@beat_init.connect
+def _mark_beat_started(**_kwargs):
+    from core.heartbeat import beat as _heartbeat
+
+    _heartbeat("process:beat")
+
+
+@task_failure.connect
+def _record_task_failure(sender=None, exception=None, **_kwargs):
+    """Persist the most recent task exception so production failures are
+    visible in /health/celery-debug. Must never break the task path."""
+    from core.redis_cache import cache
+
+    try:
+        cache.set(
+            "celery:last_task_failure",
+            {
+                "task": getattr(sender, "name", str(sender)),
+                "error": f"{type(exception).__name__}: {exception}"[:500],
+                "at": datetime.now(timezone.utc).isoformat(),
+            },
+            ttl=7 * 24 * 3600,
+        )
+    except Exception:
+        pass
 
 # Periodic tasks (Celery Beat schedule)
 celery_app.conf.beat_schedule = {

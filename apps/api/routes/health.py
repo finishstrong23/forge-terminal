@@ -312,3 +312,53 @@ def redis_debug():
         }
 
     return report
+
+
+@router.get("/health/celery-debug")
+def celery_debug():
+    """
+    TEMPORARY M0 triage: is the Celery side alive? Asked over the broker,
+    so it needs no Railway log access. Reports live workers (broadcast
+    ping), the task names each worker has registered, default-queue
+    backlog depth (grows when beat schedules but no worker consumes),
+    process-boot heartbeats, and the most recent task exception.
+    """
+    from services.discovery.celery_app import celery_app
+
+    now = datetime.now(timezone.utc)
+    report: dict = {"checked_at": _iso(now)}
+
+    # Live workers over the broker. {} = broker fine but nobody consuming.
+    try:
+        insp = celery_app.control.inspect(timeout=2.0)
+        report["workers"] = insp.ping() or {}
+        registered = insp.registered() or {}
+        report["registered_tasks"] = {w: sorted(t) for w, t in registered.items()}
+    except Exception as exc:
+        report["workers"] = None
+        report["workers_error"] = f"{type(exc).__name__}: {exc}"
+
+    # Default-queue backlog depth.
+    try:
+        client = redis_lib.from_url(
+            os.getenv("REDIS_URL", ""), socket_connect_timeout=5, socket_timeout=5
+        )
+        report["queue_depth"] = int(client.llen("celery"))
+        client.close()
+    except Exception as exc:
+        report["queue_depth"] = None
+        report["queue_depth_error"] = f"{type(exc).__name__}: {exc}"
+
+    # Boot heartbeats (worker_ready/beat_init signals; require services to
+    # be running current code — absence + live workers means stale code).
+    boots = heartbeat.read(["process:worker", "process:beat"])
+    report["process_heartbeats"] = {
+        name.split(":", 1)[1]: {
+            "last_seen_at": _iso(ts),
+            "age_seconds": _age_seconds(ts, now),
+        }
+        for name, ts in boots.items()
+    }
+
+    report["last_task_failure"] = cache.get("celery:last_task_failure")
+    return report

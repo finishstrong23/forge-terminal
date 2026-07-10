@@ -58,6 +58,18 @@ def test_liveness_endpoint_still_works(client):
     assert r.status_code == 200 and r.json()["database"] == "connected"
 
 
+def test_celery_debug_degrades_readably_without_broker(client):
+    r = client.get("/health/celery-debug")
+    assert r.status_code == 200
+    body = r.json()
+    # Broker is down in tests: workers unreadable (error) or none found.
+    assert body["workers"] in (None, {})
+    assert body["queue_depth"] is None and "queue_depth_error" in body
+    assert body["process_heartbeats"]["worker"]["last_seen_at"] is None
+    assert body["process_heartbeats"]["beat"]["last_seen_at"] is None
+    assert body["last_task_failure"] is None
+
+
 def test_redis_debug_reports_failure_stage_without_secrets(client):
     r = client.get("/health/redis-debug")
     assert r.status_code == 200
