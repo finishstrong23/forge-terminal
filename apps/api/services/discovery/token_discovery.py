@@ -22,6 +22,16 @@ from models.token import TokenSignal
 PUMP_FUN_API = "https://frontend-api.pump.fun"
 
 
+def helius_rpc_url() -> Optional[str]:
+    """Explicit HELIUS_RPC_URL, else derived from HELIUS_API_KEY — one
+    configured key is enough to power DAS discovery."""
+    if settings.HELIUS_RPC_URL:
+        return settings.HELIUS_RPC_URL
+    if settings.HELIUS_API_KEY:
+        return f"https://mainnet.helius-rpc.com/?api-key={settings.HELIUS_API_KEY}"
+    return None
+
+
 async def poll_new_tokens() -> List[Dict]:
     """
     Discover new Pump.fun tokens. Tries Helius DAS first, falls back to Pump.fun API.
@@ -41,7 +51,7 @@ async def _discover_via_helius_das() -> List[Dict]:
     """
     Use Helius DAS API to search for recently created Pump.fun tokens.
     """
-    rpc_url = settings.HELIUS_RPC_URL
+    rpc_url = helius_rpc_url()
     if not rpc_url:
         return []
 

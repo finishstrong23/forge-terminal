@@ -682,6 +682,11 @@ class HeliusWebhookProcessor:
 
 # ==================== WEBHOOK ENDPOINT ====================
 
+# Owner guard for the mutating registration endpoint. Safe as a top-level
+# import: routes.auth depends only on core/models/schemas, never on
+# discovery services, so no cycle.
+from routes.auth import require_owner
+
 @router.post("/webhooks/helius")
 async def helius_webhook(
     request: Request,
@@ -761,6 +766,29 @@ async def helius_webhook(
     except Exception as e:
         print(f"❌ Webhook error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/webhooks/helius/registration")
+async def helius_registration_status():
+    """
+    Read-only: is this deployment's webhook registered with Helius?
+    Shows config presence (not values), the URL we register under, and the
+    outcome of the most recent registration attempt (runs at every boot).
+    """
+    from services.discovery.helius_webhooks import registration_status
+
+    return registration_status()
+
+
+@router.post("/webhooks/helius/register")
+async def helius_register_now(user=Depends(require_owner)):
+    """
+    Owner-only: force a create-or-update of the Helius webhook right now
+    instead of waiting for the next deploy's startup pass.
+    """
+    from services.discovery.helius_webhooks import ensure_webhook_registered
+
+    return await ensure_webhook_registered()
 
 
 @router.get("/webhooks/helius/stats")

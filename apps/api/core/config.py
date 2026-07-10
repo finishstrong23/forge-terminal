@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # Base URL of the web app, used for Stripe checkout/portal redirects.
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # Public base URL of THIS API, for Helius webhook self-registration.
+    # Optional: on Railway the injected RAILWAY_PUBLIC_DOMAIN is used instead.
+    PUBLIC_API_URL: Optional[str] = None
+
     HELIUS_API_KEY: Optional[str] = None
     HELIUS_WEBHOOK_SECRET: Optional[str] = None
     HELIUS_RPC_URL: Optional[str] = None

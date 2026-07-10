@@ -28,17 +28,21 @@ exit test passes in **production**, not localhost.
 The deploy has been idle since May 12 and "nothing works" in the preview.
 Known-suspect list, most likely first:
 
-1. **Railway process topology.** The `Procfile` declares `web`, `worker`,
-   and `beat`, but Railway does not fan one service out into three
-   processes. If only `web` is running, **no token discovery, webhook
-   processing, scoring, or aggregation has ever executed in prod** — the
-   feed would be permanently empty. Fix: three Railway services from the
-   same repo (or one service per start command), sharing `DATABASE_URL` /
-   `REDIS_URL`. Verify worker + beat logs show task activity.
-2. **Helius webhook registration.** Registered webhooks and API keys can
-   lapse. `GET /api/v1/webhooks/helius/stats` shows event counts —
-   zero/stale counts mean re-registering via `token_discovery` or checking
-   the Helius dashboard.
+1. **Railway process topology.** ✅ resolved 2026-07-10 — web/worker/beat
+   run as three Railway services sharing `DATABASE_URL`/`REDIS_URL`. The
+   original outage was the Redis service itself: "Active" in the dashboard
+   but not accepting TCP connections on either address family (diagnosed
+   via `/health/redis-debug`); a **Redeploy** (not Restart) of the Redis
+   service fixed it. The Redis cache client now self-heals (30s reconnect
+   cooldown) and Celery sets `broker_connection_retry_on_startup`, so a
+   future Redis outage no longer needs process restarts.
+2. **Helius webhook registration.** ✅ self-healing — the API
+   create-or-updates its Helius webhook on every boot (needs
+   `HELIUS_API_KEY`; targets the Railway public domain automatically,
+   override with `PUBLIC_API_URL`). `GET /api/v1/webhooks/helius/registration`
+   reports the last attempt; owner-only `POST /api/v1/webhooks/helius/register`
+   forces one. DAS discovery now derives its RPC URL from `HELIUS_API_KEY`
+   when `HELIUS_RPC_URL` is unset.
 3. **Migrations.** `alembic upgrade head` must have run against prod
    Postgres (base schema 000 + 001). The release command isn't in
    `railway.toml` — confirm how it runs, or add a release phase.
@@ -52,6 +56,9 @@ Known-suspect list, most likely first:
 reports last webhook event time, unprocessed backlog, last-scored-token
 freshness, Redis state, and per-beat-task heartbeat staleness. Turns
 "nothing works" into a diagnosable dashboard; point uptime monitors at it.
+Temporary M0 triage endpoints (remove once stable): `/health/redis-debug`
+(DNS/TCP/PING from inside the container) and `/health/celery-debug`
+(live workers, queue depth, process heartbeats, last task exception).
 
 **Exit test:** the production Discovery page shows tokens < 5 minutes old
 with a LIVE badge; `/health/pipeline` is green on every subsystem.

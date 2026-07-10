@@ -37,9 +37,15 @@ async def lifespan(app: FastAPI):
     # Start the Redis pubsub subscriber that fans messages out to WS clients.
     subscriber_task = asyncio.create_task(subscribe_and_fanout())
     logger.info("lifespan: pubsub subscriber task started")
+    # Self-heal the Helius webhook registration on every boot (no-op unless
+    # HELIUS_API_KEY + a public domain are configured; never raises).
+    from services.discovery.helius_webhooks import ensure_webhook_registered
+
+    registration_task = asyncio.create_task(ensure_webhook_registered())
     try:
         yield
     finally:
+        registration_task.cancel()
         subscriber_task.cancel()
         try:
             await subscriber_task

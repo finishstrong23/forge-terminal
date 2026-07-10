@@ -116,6 +116,13 @@ def get_current_user_optional(
     return db.query(User).filter(User.id == user_id).first()
 
 
+def require_owner(user: User = Depends(get_current_user)) -> User:
+    """Guard for operational endpoints: only accounts in OWNER_EMAILS."""
+    if user.email not in settings.OWNER_EMAILS:
+        raise HTTPException(status_code=403, detail="Owner access required")
+    return user
+
+
 def _token_response(user: User) -> TokenResponse:
     return TokenResponse(
         access_token=create_access_token(user.id),
