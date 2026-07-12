@@ -133,16 +133,52 @@ async def ensure_webhook_registered() -> dict:
             webhook_id = body.get("webhookID") or (
                 existing.get("webhookID") if existing else None
             )
-            logger.info("helius webhook %s (%s) -> %s", action, webhook_id, target_url)
-            return _record({
-                "status": "registered",
+
+            # Read-after-write: Helius can accept a write yet silently drop
+            # accountAddresses (seen in prod: webhook "registered" but
+            # watching nothing → zero deliveries). Fetch the stored config
+            # and compare.
+            stored = {}
+            if webhook_id:
+                verify = await client.get(
+                    f"{HELIUS_API_BASE}/webhooks/{webhook_id}",
+                    params={"api-key": api_key},
+                )
+                if verify.status_code == 200 and verify.content:
+                    stored = verify.json() or {}
+            stored_addresses = stored.get("accountAddresses")
+            if stored_addresses is None:
+                stored_addresses = body.get("accountAddresses") or []
+
+            watching = len(stored_addresses) > 0
+            status = "registered" if watching else "registered_but_not_watching"
+            logger.info(
+                "helius webhook %s (%s) -> %s [stored addresses: %d]",
+                action, webhook_id, target_url, len(stored_addresses),
+            )
+            report = {
+                "status": status,
                 "action": action,
                 "webhook_id": webhook_id,
                 "target_url": target_url,
-                "transaction_types": WEBHOOK_TRANSACTION_TYPES,
+                "sent_account_addresses": [settings.PUMP_FUN_PROGRAM_ID],
+                "stored_account_addresses_count": len(stored_addresses),
+                "stored_transaction_types": stored.get("transactionTypes")
+                or body.get("transactionTypes"),
+                "write_response_addresses_count": len(body.get("accountAddresses") or []),
                 "auth_header_set": bool(settings.HELIUS_WEBHOOK_SECRET),
-                "account_webhook_count": len(webhooks) if not existing else len(webhooks),
-            })
+                "account_webhook_count": len(webhooks),
+            }
+            if not watching:
+                report["hint"] = (
+                    "Helius accepted the write but kept an empty accountAddresses "
+                    "list — the webhook watches nothing, so no events will ever "
+                    "arrive. Usual causes: plan/credit limits on the Helius "
+                    "account, or program-address monitoring not allowed on the "
+                    "current tier. Check the webhook and plan usage at "
+                    "https://dashboard.helius.dev"
+                )
+            return _record(report)
 
     except Exception as exc:
         return _record({
