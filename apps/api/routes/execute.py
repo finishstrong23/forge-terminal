@@ -13,11 +13,13 @@ builds; the user's wallet signs and sends. Recording is client-reported
 v1 — a confirmation-checker beat task is future work (see ROADMAP M3).
 """
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.database import get_db
@@ -37,6 +39,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/execute")
 
 LAMPORTS_PER_SOL = 1_000_000_000
+
+# Solana mint/pubkey: base58, 32–44 chars. Validating the charset (not just
+# length) keeps unexpected characters out of upstream query strings.
+_BASE58_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+
+
+def _validate_mint(value: str) -> str:
+    if not _BASE58_RE.match(value):
+        raise ValueError("not a valid base58 Solana address")
+    return value
 
 
 @router.get("/token-meta")
@@ -148,14 +160,20 @@ def build_swap_transaction(body: SwapTransactionRequest):
 
 
 class ManualTradeCreate(BaseModel):
-    token_address: str = Field(min_length=1)
+    token_address: str = Field(min_length=32, max_length=44)
     trade_type: Literal["buy", "sell"] = "buy"
-    sol_amount: float = Field(gt=0)
+    # Upper bounds reject absurd/NaN values from reaching persisted PnL math.
+    sol_amount: float = Field(gt=0, le=1_000_000)
     # Quoted token quantity (received on buys, spent on sells). Optional so
     # older clients keep working; positions need it for quantity math.
-    token_amount: Optional[float] = Field(None, gt=0)
+    token_amount: Optional[float] = Field(None, gt=0, le=1e18)
     signature: str = Field(min_length=32, max_length=128)
     slippage_bps: Optional[int] = Field(None, ge=1, le=5_000)
+
+    @field_validator("token_address")
+    @classmethod
+    def _mint_is_base58(cls, v: str) -> str:
+        return _validate_mint(v)
 
 
 class ManualTradeResponse(BaseModel):
@@ -190,13 +208,17 @@ def record_manual_trade(
     current_user: User = Depends(get_current_user),
 ) -> ManualTradeResponse:
     """
-    Record a swap the user just signed and sent. Client-reported v1:
-    status stays "submitted" until a confirmation checker exists, and the
-    unique signature column dedupes double-reports (409).
+    Record a swap the user just signed and sent. Client-reported v1: status
+    stays "submitted" until the confirmation checker resolves it. Dedup is
+    scoped to (user_id, signature) so one user can't pre-claim a public
+    on-chain signature and suppress another user's real trade.
     """
     existing = (
         db.query(ExecutedTrade.id)
-        .filter(ExecutedTrade.signature == body.signature)
+        .filter(
+            ExecutedTrade.signature == body.signature,
+            ExecutedTrade.user_id == current_user.id,
+        )
         .first()
     )
     if existing:
@@ -228,7 +250,13 @@ def record_manual_trade(
         executed_at=datetime.now(timezone.utc),
     )
     db.add(trade)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Concurrent double-submit of the same (user, signature) races past
+        # the check above and trips the unique constraint — treat as dup.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Trade already recorded")
     db.refresh(trade)
     logger.info("execute/trades: user %s recorded %s %s SOL on %s",
                 current_user.id, body.trade_type, body.sol_amount, body.token_address)

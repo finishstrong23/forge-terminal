@@ -11,7 +11,7 @@ Helius webhook setup:
 3. Subscribe to: SWAP, TOKEN_MINT, TRANSFER events
 4. Set webhook URL to: https://api.forgeterminal.com/api/v1/webhooks/helius
 """
-from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from datetime import datetime, timezone, timedelta
@@ -20,9 +20,14 @@ import json
 import hashlib
 import hmac
 import logging
+import math
 import secrets
 import httpx
 import asyncio
+
+# Largest event array we'll accept on the public webhook ingest — bounds the
+# per-request DB write amplification an attacker could drive.
+MAX_WEBHOOK_EVENTS = 100
 
 from core.database import get_db
 from models.token import HeliusEvent, TokenSignal
@@ -619,27 +624,64 @@ class HeliusWebhookProcessor:
         if signal.age_minutes and signal.age_minutes > 0:
             signal.holder_growth_rate = (signal.entity_adjusted_buyers or 1) / signal.age_minutes
 
+    # A single pump.fun swap is bounded; anything above this in one transfer
+    # is fee-bundling, a self-transfer attack, or garbage — reject it so a
+    # crafted event can't set an arbitrary price/market cap for all users.
+    MAX_SANE_SOL_PER_SWAP = 100_000.0
+
+    @staticmethod
+    def _finite_positive(value) -> bool:
+        return (
+            isinstance(value, (int, float))
+            and math.isfinite(value)
+            and value > 0
+        )
+
     def _extract_sol_amount(self, event_data: Dict) -> Optional[float]:
         """
-        SOL moved in the swap's MAIN leg. A pump.fun transaction carries
-        several native transfers (1% protocol fee, rent, tips) alongside
-        the swap itself; taking the first one made prices off by ~100x
-        whenever a fee/tip appeared before the swap leg — the largest
-        transfer is the trade.
+        SOL moved in the swap's bonding-curve leg. A pump.fun transaction
+        carries several native transfers (1% protocol fee, rent, tips)
+        alongside the swap; picking the first mispriced by ~100x, and
+        picking the LARGEST let an attacker bundle a big self-transfer to
+        inflate the price. So prefer the transfer whose counterparty is the
+        bonding curve or the Pump.fun program, ignore self-transfers
+        (from == to), reject non-finite/absurd values, and only fall back
+        to the largest sane transfer when no curve leg is identifiable.
         """
         try:
-            amounts = [
-                t.get('amount', 0) for t in event_data.get('nativeTransfers') or []
-            ]
-            amounts = [a for a in amounts if isinstance(a, (int, float)) and a > 0]
-            if not amounts:
-                return None
-            return max(amounts) / 1e9  # lamports -> SOL
+            bonding_curve = self._extract_bonding_curve(event_data)
+            transfers = event_data.get('nativeTransfers') or []
+            curve_amounts = []
+            all_amounts = []
+            for t in transfers:
+                amount = t.get('amount', 0)
+                if not self._finite_positive(amount):
+                    continue
+                sol = amount / 1e9
+                if sol > self.MAX_SANE_SOL_PER_SWAP:
+                    continue  # fee-bundle / self-transfer inflation attempt
+                frm = t.get('fromUserAccount', '')
+                to = t.get('toUserAccount', '')
+                if frm and frm == to:
+                    continue  # self-transfer, not a real swap leg
+                all_amounts.append(sol)
+                if bonding_curve and (
+                    to == bonding_curve
+                    or frm == bonding_curve
+                    or to == self.PUMP_FUN_PROGRAM
+                    or frm == self.PUMP_FUN_PROGRAM
+                ):
+                    curve_amounts.append(sol)
+            if curve_amounts:
+                return max(curve_amounts)
+            return max(all_amounts) if all_amounts else None
         except Exception:
             return None
 
     def _extract_token_amount(self, event_data: Dict, mint: Optional[str]) -> Optional[float]:
-        """Tokens of `mint` moved in this swap (Helius enhanced format)."""
+        """Tokens of `mint` moved in this swap (Helius enhanced format).
+        Rejects non-finite values (NaN/Infinity survive json.loads and would
+        poison price/market-cap math)."""
         if not mint:
             return None
         try:
@@ -647,7 +689,7 @@ class HeliusWebhookProcessor:
                 if transfer.get('mint') != mint:
                     continue
                 amount = transfer.get('tokenAmount')
-                if isinstance(amount, (int, float)) and amount > 0:
+                if self._finite_positive(amount):
                     return float(amount)
             return None
         except Exception:
@@ -816,22 +858,23 @@ async def helius_webhook(
     Receive Helius webhook events
 
     Auth policy: When HELIUS_WEBHOOK_SECRET is configured, requests must
-    include an Authorization header whose value exactly matches the secret
-    (bearer-token style as sent by Helius, compared in constant time).
-    When the secret is unset, requests are accepted unauthenticated and a
-    warning is logged — this preserves dev/test workflows.
+    include an Authorization header whose value matches the secret (raw or
+    Bearer-prefixed, compared in constant time). When the secret is unset,
+    unsigned requests are accepted ONLY outside production — in production
+    the config validator requires the secret, and this path fails closed.
 
-    Pipeline:
-    1. Authorization check (above)
-    2. Stores raw event immediately
-    3. Returns 200 OK fast
-    4. Processes event in background
+    Untrusted-input defenses: the events array is length-capped, and JSON
+    NaN/Infinity constants are rejected (they survive json.loads and would
+    poison price/market-cap math downstream).
     """
     # Verify Helius webhook authorization (Authorization header carries the
     # webhook's configured authHeader — accept it raw or Bearer-prefixed).
     expected_secret = settings.HELIUS_WEBHOOK_SECRET
     if not expected_secret:
-        print("⚠️  HELIUS_WEBHOOK_SECRET not configured, accepting unsigned requests")
+        if settings.is_production:
+            # Fail closed: prod must never accept unauthenticated writes.
+            raise HTTPException(status_code=503, detail="Webhook ingest not configured")
+        print("⚠️  HELIUS_WEBHOOK_SECRET not configured, accepting unsigned requests (non-prod)")
     else:
         auth_header = request.headers.get("Authorization", "")
         bare = auth_header.removeprefix("Bearer ").strip()
@@ -844,15 +887,25 @@ async def helius_webhook(
             raise HTTPException(status_code=401, detail={"error": "invalid authorization"})
 
     try:
-        # Get raw body for signature verification
         body = await request.body()
-
-        # Parse JSON
-        events = await request.json()
+        # Reject NaN/Infinity at parse time — Python's json accepts them by
+        # default and they'd flow into persisted float columns.
+        try:
+            events = json.loads(body, parse_constant=lambda _c: (_ for _ in ()).throw(
+                ValueError("non-finite JSON constant")
+            ))
+        except ValueError as parse_err:
+            raise HTTPException(status_code=400, detail=f"invalid JSON: {parse_err}")
 
         # Helius sends an array of events
         if not isinstance(events, list):
             events = [events]
+
+        if len(events) > MAX_WEBHOOK_EVENTS:
+            raise HTTPException(
+                status_code=413,
+                detail=f"too many events (max {MAX_WEBHOOK_EVENTS} per request)",
+            )
 
         processor = HeliusWebhookProcessor(db)
 
@@ -887,19 +940,23 @@ async def helius_webhook(
             "message": "Events queued for background processing" if queued_count else "Events processed synchronously (Celery unavailable)"
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"❌ Webhook error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Don't echo internal exception text to callers (info leak) — log it.
+        logger.exception("webhook processing error")
+        raise HTTPException(status_code=500, detail="internal error")
 
 
 @router.get("/webhooks/helius/registration")
-async def helius_registration_status(live: bool = False):
+async def helius_registration_status(live: bool = False, user=Depends(require_owner)):
     """
-    Read-only: is this deployment's webhook registered with Helius?
+    Owner-only: is this deployment's webhook registered with Helius?
     Shows config presence (not values), the URL we register under, the
     outcome of the most recent registration attempt (runs at every boot),
     and rejected-delivery counts. With ?live=true, also fetches the
-    account's webhook configs from Helius as currently stored.
+    account's webhook configs from Helius as currently stored. Owner-gated
+    because it reveals operational topology and can drive outbound calls.
     """
     from services.discovery.helius_webhooks import live_account_view, registration_status
 
@@ -921,9 +978,9 @@ async def helius_register_now(user=Depends(require_owner)):
 
 
 @router.get("/webhooks/helius/stats")
-async def webhook_stats(db: Session = Depends(get_db)):
+async def webhook_stats(db: Session = Depends(get_db), user=Depends(require_owner)):
     """
-    Get webhook processing statistics
+    Owner-only: webhook processing statistics.
     """
     from sqlalchemy import func
 
@@ -998,16 +1055,14 @@ async def archive_stale_events(
 
 @router.post("/webhooks/helius/reprocess")
 async def reprocess_events(
-    limit: int = 100,
-    db: Session = Depends(get_db)
+    limit: int = Query(100, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    user=Depends(require_owner),
 ):
     """
-    Reprocess failed or pending events
-
-    Useful for:
-    - Fixing bugs in processing logic
-    - Recovering from errors
-    - Testing
+    Owner-only: reprocess failed or pending events. Owner-gated because
+    process_event re-stamps wallet activity at processing time (replaying
+    old events poisons live leaderboard data — see archive-stale).
     """
     processor = HeliusWebhookProcessor(db)
 
@@ -1037,16 +1092,14 @@ async def reprocess_events(
 
 @router.post("/webhooks/helius/refresh-metadata")
 async def refresh_token_metadata(
-    limit: int = 10,  # Reduced default limit to avoid rate limiting
-    db: Session = Depends(get_db)
+    limit: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user=Depends(require_owner),
 ):
     """
-    Refresh metadata for tokens with UNKNOWN symbol/name
-
-    Fetches fresh data from Pump.fun API for tokens missing metadata.
-
-    NOTE: This is rate limited to max 3 tokens per minute to avoid Cloudflare bans.
-    Call this endpoint multiple times with small batches.
+    Owner-only: refresh metadata for tokens with UNKNOWN symbol/name from
+    the Pump.fun API. Owner-gated because it drives outbound calls on the
+    server IP (Cloudflare-ban risk). Rate limited to ~3 tokens/minute.
     """
     # Find tokens with missing metadata
     tokens = db.query(TokenSignal).filter(
@@ -1102,12 +1155,14 @@ async def refresh_token_metadata(
 
 @router.post("/webhooks/helius/recalculate-scores")
 async def recalculate_all_scores(
-    limit: int = 500,
+    limit: int = Query(500, ge=1, le=1000),
     rebuild_metrics: bool = True,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user=Depends(require_owner),
 ):
     """
-    Recalculate scores for all tokens
+    Owner-only: recalculate scores for tokens. Owner-gated because it mass-
+    rewrites user-facing metrics/scores and is DB-heavy.
 
     If rebuild_metrics=True (default), recomputes metrics from WalletActivity
     data (Phase 2) with fallback to HeliusEvent estimates for tokens without

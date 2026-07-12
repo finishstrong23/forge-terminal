@@ -47,8 +47,9 @@ def test_target_url_prefers_explicit_setting(monkeypatch):
     )
 
 
-def test_registration_status_endpoint_is_public_and_masked(client):
-    r = client.get("/api/v1/webhooks/helius/registration")
+def test_registration_status_requires_owner_and_is_masked(client, owner_auth):
+    assert client.get("/api/v1/webhooks/helius/registration").status_code == 401
+    r = client.get("/api/v1/webhooks/helius/registration", headers=owner_auth)
     assert r.status_code == 200
     body = r.json()
     assert set(body) == {
@@ -61,9 +62,11 @@ def test_registration_status_endpoint_is_public_and_masked(client):
     assert isinstance(body["helius_api_key_set"], bool)
 
 
-def test_registration_live_view_reports_missing_key(client, monkeypatch):
+def test_registration_live_view_reports_missing_key(client, owner_auth, monkeypatch):
     monkeypatch.setattr(settings, "HELIUS_API_KEY", None)
-    r = client.get("/api/v1/webhooks/helius/registration?live=true")
+    r = client.get(
+        "/api/v1/webhooks/helius/registration?live=true", headers=owner_auth
+    )
     assert r.status_code == 200
     assert r.json()["live"] == {"error": "HELIUS_API_KEY not set"}
 
@@ -92,7 +95,7 @@ def test_ingest_accepts_raw_and_bearer_auth_headers(client, monkeypatch):
     assert rejected.status_code == 401
 
 
-def test_archive_stale_marks_only_pre_cutoff_events(client, db):
+def test_archive_stale_marks_only_pre_cutoff_events(client, db, owner_auth):
     from datetime import datetime, timedelta, timezone
 
     from models.token import HeliusEvent
@@ -110,16 +113,9 @@ def test_archive_stale_marks_only_pre_cutoff_events(client, db):
         "/api/v1/webhooks/helius/archive-stale?before=2026-01-01"
     ).status_code == 401
 
-    # Owner account (finishstrong23@gmail.com is in OWNER_EMAILS).
-    token = client.post(
-        "/api/v1/auth/register",
-        json={"email": "finishstrong23@gmail.com", "password": "ownerpass123"},
-    ).json()["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-
     cutoff = (now - timedelta(days=1)).date().isoformat()
     r = client.post(
-        f"/api/v1/webhooks/helius/archive-stale?before={cutoff}", headers=headers
+        f"/api/v1/webhooks/helius/archive-stale?before={cutoff}", headers=owner_auth
     )
     assert r.status_code == 200 and r.json()["archived"] == 1
 

@@ -73,7 +73,8 @@ def _skip_reason(
     signal: Optional[TokenSignal],
     wallet_score: Optional[float],
     usd_value: Optional[float],
-    daily_net_outflow: float = 0.0,
+    position_usd: float = 0.0,
+    daily_buy_usd: float = 0.0,
 ) -> Optional[str]:
     if sub.token_blacklist and activity.token_address in sub.token_blacklist:
         return "token blacklisted by subscription"
@@ -88,23 +89,29 @@ def _skip_reason(
             f"wallet sustainability {wallet_score:.1f} below "
             f"threshold {sub.min_sustainability_score:.1f}"
         )
+    # Position cap is on the ACCUMULATED holding, not a single trade — ten
+    # $99 buys must not slip past a $100 cap. Only buys grow the position.
     if (
         sub.max_position_usd is not None
         and usd_value is not None
-        and usd_value > sub.max_position_usd
+        and activity.activity_type == "buy"
+        and position_usd + usd_value > sub.max_position_usd
     ):
         return (
-            f"position ${usd_value:.2f} exceeds cap ${sub.max_position_usd:.2f}"
+            f"position ${position_usd + usd_value:.2f} exceeds cap "
+            f"${sub.max_position_usd:.2f}"
         )
+    # Daily cap is on GROSS buy outflow today — a sell must not create fresh
+    # buy headroom (that let a sell/buy loop spend past the cap forever).
     if (
         sub.daily_loss_cap_usd is not None
         and activity.activity_type == "buy"
         and usd_value is not None
-        and daily_net_outflow + usd_value > sub.daily_loss_cap_usd
+        and daily_buy_usd + usd_value > sub.daily_loss_cap_usd
     ):
         return (
-            f"daily loss cap: ${daily_net_outflow + usd_value:.2f} net outflow "
-            f"today would exceed ${sub.daily_loss_cap_usd:.2f}"
+            f"daily loss cap: ${daily_buy_usd + usd_value:.2f} bought today "
+            f"would exceed ${sub.daily_loss_cap_usd:.2f}"
         )
     return None
 
@@ -155,30 +162,53 @@ def record_shadow_trades(
     # One price lookup per run; None means USD caps can't be enforced this run.
     sol_price = get_sol_price_usd()
 
-    # Today's simulated net USD outflow per subscription (buys - sells since
-    # UTC midnight) seeds the daily-loss-cap check; the loop below keeps the
-    # running total current as it records new rows.
+    sub_ids = [s.id for s in subs]
+    # Gross simulated buy USD per subscription since UTC midnight seeds the
+    # daily-cap check (gross, so sells can't create fresh buy headroom).
     today_start = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
-    net_outflow: Dict[str, float] = {}
-    outflow_rows = (
+    daily_buy_usd: Dict[str, float] = {}
+    for sub_id, usd_sum in (
         db.query(
             ExecutedTrade.copy_subscription_id,
+            func.coalesce(func.sum(ExecutedTrade.usd_value), 0.0),
+        )
+        .filter(
+            ExecutedTrade.copy_subscription_id.in_(sub_ids),
+            ExecutedTrade.status == "simulated",
+            ExecutedTrade.trade_type == "buy",
+            ExecutedTrade.executed_at >= today_start,
+        )
+        .group_by(ExecutedTrade.copy_subscription_id)
+        .all()
+    ):
+        daily_buy_usd[sub_id] = float(usd_sum or 0)
+
+    # Cumulative simulated position (buy - sell USD) per (subscription, token)
+    # across all time seeds the position cap; the loop keeps both totals live.
+    position_usd: Dict[tuple, float] = {}
+    for sub_id, token, trade_type, usd_sum in (
+        db.query(
+            ExecutedTrade.copy_subscription_id,
+            ExecutedTrade.token_address,
             ExecutedTrade.trade_type,
             func.coalesce(func.sum(ExecutedTrade.usd_value), 0.0),
         )
         .filter(
-            ExecutedTrade.copy_subscription_id.in_([s.id for s in subs]),
+            ExecutedTrade.copy_subscription_id.in_(sub_ids),
             ExecutedTrade.status == "simulated",
-            ExecutedTrade.executed_at >= today_start,
         )
-        .group_by(ExecutedTrade.copy_subscription_id, ExecutedTrade.trade_type)
+        .group_by(
+            ExecutedTrade.copy_subscription_id,
+            ExecutedTrade.token_address,
+            ExecutedTrade.trade_type,
+        )
         .all()
-    )
-    for sub_id, trade_type, usd_sum in outflow_rows:
+    ):
         sign = 1.0 if trade_type == "buy" else -1.0
-        net_outflow[sub_id] = net_outflow.get(sub_id, 0.0) + sign * float(usd_sum or 0)
+        key = (sub_id, token)
+        position_usd[key] = position_usd.get(key, 0.0) + sign * float(usd_sum or 0)
 
     # One IN query resolves which candidate rows already exist.
     candidates = []
@@ -212,9 +242,11 @@ def record_shadow_trades(
             if activity.sol_amount is not None and sol_price is not None
             else None
         )
+        pos_key = (sub.id, activity.token_address)
         reason = _skip_reason(
             sub, activity, signal, scores.get(sub.wallet_address), usd_value,
-            net_outflow.get(sub.id, 0.0),
+            max(position_usd.get(pos_key, 0.0), 0.0),
+            daily_buy_usd.get(sub.id, 0.0),
         )
         db.add(
             ExecutedTrade(
@@ -239,8 +271,11 @@ def record_shadow_trades(
         else:
             recorded += 1
             if usd_value is not None:
-                delta = usd_value if activity.activity_type == "buy" else -usd_value
-                net_outflow[sub.id] = net_outflow.get(sub.id, 0.0) + delta
+                if activity.activity_type == "buy":
+                    daily_buy_usd[sub.id] = daily_buy_usd.get(sub.id, 0.0) + usd_value
+                    position_usd[pos_key] = position_usd.get(pos_key, 0.0) + usd_value
+                else:
+                    position_usd[pos_key] = position_usd.get(pos_key, 0.0) - usd_value
 
     db.flush()
     if recorded or skipped:

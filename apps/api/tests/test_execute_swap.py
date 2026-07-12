@@ -75,7 +75,7 @@ def test_record_and_list_manual_trades(client, db, auth, monkeypatch):
     assert client.get("/api/v1/execute/trades").status_code == 401
 
     r = client.post("/api/v1/execute/trades", json={
-        "token_address": "TOK1", "trade_type": "buy",
+        "token_address": "MintTok1111111111111111111111111111111111111", "trade_type": "buy",
         "sol_amount": 2.0, "signature": SIG, "slippage_bps": 150,
     }, headers=auth)
     assert r.status_code == 201, r.text
@@ -86,7 +86,7 @@ def test_record_and_list_manual_trades(client, db, auth, monkeypatch):
 
     # Duplicate signature -> 409.
     r = client.post("/api/v1/execute/trades", json={
-        "token_address": "TOK1", "trade_type": "buy",
+        "token_address": "MintTok1111111111111111111111111111111111111", "trade_type": "buy",
         "sol_amount": 2.0, "signature": SIG,
     }, headers=auth)
     assert r.status_code == 409

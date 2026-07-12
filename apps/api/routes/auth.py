@@ -17,6 +17,7 @@ purpose-scoped JWTs (core/security.create_token) so access tokens and email
 tokens are mutually unusable.
 """
 import logging
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -69,12 +70,24 @@ FORGOT_RATE = (5, 3600)
 RESET_TOKEN_MINUTES = 30
 VERIFY_TOKEN_MINUTES = 60 * 24 * 7
 
+# A valid bcrypt hash of a random string, compared against on unknown-email
+# logins so response timing doesn't reveal whether the account exists.
+_DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(16))
+
 
 def _client_ip(request: Request) -> str:
-    """Client IP, honoring the proxy chain Railway/Vercel put in front."""
+    """
+    Client IP for rate limiting. X-Forwarded-For is a client-appendable
+    list — the LEFTMOST entry is attacker-controlled, so keying on it lets
+    an attacker rotate a fake value per request and bypass throttling. The
+    trustworthy value is the RIGHTMOST hop, appended by our own proxy
+    (Railway/Vercel) closest to the app.
+    """
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+        if hops:
+            return hops[-1]
     return request.client.host if request.client else "unknown"
 
 
@@ -156,6 +169,10 @@ def register(
 ) -> TokenResponse:
     _throttle(request, "register", REGISTER_RATE)
     email = body.email.lower()
+    # Privilege is granted by email membership in OWNER_EMAILS, so an owner
+    # address must never be self-registerable by a stranger.
+    if email in {e.lower() for e in settings.OWNER_EMAILS}:
+        raise HTTPException(status_code=403, detail="This email cannot be registered")
     if db.query(User.id).filter(User.email == email).first():
         raise HTTPException(status_code=409, detail="Email already registered")
     user = User(email=email, password_hash=hash_password(body.password))
@@ -173,8 +190,13 @@ def login(
 ) -> TokenResponse:
     _throttle(request, "login", LOGIN_RATE)
     user = db.query(User).filter(User.email == body.email.lower()).first()
-    # Same message for unknown email and wrong password — don't leak which.
-    if user is None or not verify_password(body.password, user.password_hash):
+    # Same message AND same timing for unknown-email vs wrong-password: run a
+    # bcrypt compare against a dummy hash when the email is unknown so the
+    # ~100ms hashing cost can't be used as an account-existence oracle.
+    if user is None:
+        verify_password(body.password, _DUMMY_PASSWORD_HASH)
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     user.last_login = datetime.now(timezone.utc)
     db.commit()

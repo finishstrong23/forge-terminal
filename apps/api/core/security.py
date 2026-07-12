@@ -58,8 +58,9 @@ def create_token(
 def decode_token(token: str, purpose: str) -> Optional[str]:
     """Return the token's `sub` if valid, unexpired, and purpose-matched.
 
-    Tokens minted before the purpose claim existed carry no `purpose`;
-    they are honored as "access" tokens only.
+    An explicit `purpose` claim is required — a signed token without one is
+    rejected rather than defaulted to "access", so no token kind is usable
+    outside the purpose it was minted for.
     """
     try:
         payload = jwt.decode(
@@ -67,7 +68,7 @@ def decode_token(token: str, purpose: str) -> Optional[str]:
         )
     except JWTError:
         return None
-    token_purpose = payload.get("purpose", "access")
+    token_purpose = payload.get("purpose")
     if token_purpose != purpose:
         return None
     sub = payload.get("sub")

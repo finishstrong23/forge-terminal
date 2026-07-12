@@ -36,7 +36,7 @@ def test_login_throttled_when_limiter_denies(client, db, monkeypatch):
     assert r.status_code == 429
 
 
-def test_throttle_key_uses_forwarded_for(client, db, monkeypatch):
+def test_throttle_key_uses_trusted_rightmost_forwarded_for(client, db, monkeypatch):
     from routes import auth as auth_routes
 
     seen_keys = []
@@ -46,10 +46,13 @@ def test_throttle_key_uses_forwarded_for(client, db, monkeypatch):
         return True
 
     monkeypatch.setattr(auth_routes.cache, "rate_limit", spy)
+    # The client-controlled leftmost hop (203.0.113.9) must be ignored; only
+    # the rightmost hop (10.0.0.1, appended by our proxy) is trusted, so a
+    # spoofed XFF can't rotate the rate-limit key.
     client.post("/api/v1/auth/login",
                 json={"email": "x@example.com", "password": "password123"},
                 headers={"X-Forwarded-For": "203.0.113.9, 10.0.0.1"})
-    assert seen_keys and seen_keys[-1] == "rl:login:203.0.113.9"
+    assert seen_keys and seen_keys[-1] == "rl:login:10.0.0.1"
 
 
 # ---------- password reset ----------

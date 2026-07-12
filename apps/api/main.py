@@ -54,20 +54,27 @@ async def lifespan(app: FastAPI):
         logger.info("lifespan: pubsub subscriber task stopped")
 
 
+# Hide the interactive API explorer + schema in production so the full
+# route map (including operational endpoints) isn't handed to anyone.
+_docs_enabled = not settings.is_production
 app = FastAPI(
     title=settings.APP_NAME,
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # Auth is Bearer-token, not cookie-based, so credentialed CORS isn't
+    # needed — keeping it off avoids the fragile allow_credentials + origin
+    # combination if the allowlist is ever broadened.
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(health_router)

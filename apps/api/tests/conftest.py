@@ -73,6 +73,25 @@ def client(db):
 
 
 @pytest.fixture()
+def owner_auth(db):
+    """Bearer header for an owner account. Owner emails can't be registered
+    via the API (privilege guard), so seed the user directly and mint a
+    token for it."""
+    from core.config import settings
+    from core.security import create_access_token, hash_password
+    from models.user import User
+
+    email = settings.OWNER_EMAILS[0].lower()
+    user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        user = User(email=email, password_hash=hash_password("ownerpass123"))
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    return {"Authorization": f"Bearer {create_access_token(user.id)}"}
+
+
+@pytest.fixture()
 def seed_activity(db):
     """Factory that inserts a WalletActivity row."""
     from datetime import datetime, timedelta, timezone

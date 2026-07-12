@@ -58,8 +58,14 @@ def test_liveness_endpoint_still_works(client):
     assert r.status_code == 200 and r.json()["database"] == "connected"
 
 
-def test_celery_debug_degrades_readably_without_broker(client):
-    r = client.get("/health/celery-debug")
+def test_debug_endpoints_require_owner_auth(client):
+    # Both leak internal detail, so they must reject anonymous callers.
+    assert client.get("/health/celery-debug").status_code == 401
+    assert client.get("/health/redis-debug").status_code == 401
+
+
+def test_celery_debug_degrades_readably_without_broker(client, owner_auth):
+    r = client.get("/health/celery-debug", headers=owner_auth)
     assert r.status_code == 200
     body = r.json()
     # Broker is down in tests: workers unreadable (error) or none found.
@@ -70,8 +76,8 @@ def test_celery_debug_degrades_readably_without_broker(client):
     assert body["last_task_failure"] is None
 
 
-def test_redis_debug_reports_failure_stage_without_secrets(client):
-    r = client.get("/health/redis-debug")
+def test_redis_debug_reports_failure_stage_without_secrets(client, owner_auth):
+    r = client.get("/health/redis-debug", headers=owner_auth)
     assert r.status_code == 200
     body = r.json()
     # conftest points REDIS_URL at 127.0.0.1:1 — DNS resolves, TCP refused.

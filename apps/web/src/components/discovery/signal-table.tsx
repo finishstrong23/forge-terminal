@@ -71,8 +71,9 @@ const columns: ColumnDef<TokenSignal>[] = [
     cell: ({ row }) => (
       <div className="flex items-center gap-2">
         {/* Token logos live on arbitrary hosts (IPFS gateways etc.), so a
-            plain img with a hide-on-error fallback beats next/image here. */}
-        {row.original.image_uri && (
+            plain img with a hide-on-error fallback beats next/image here.
+            Only https URLs render — reject data:/javascript: schemes. */}
+        {row.original.image_uri?.startsWith("https://") && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={row.original.image_uri}

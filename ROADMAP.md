@@ -206,10 +206,38 @@ within its caps, and stops itself when the daily loss cap is hit.
 
 ## M5 — Launch hardening  *(runs alongside M2–M4, gates public launch)*
 
-- **Security:** rotate/verify all secrets (`SECRET_KEY` default is
-  "change-me-in-production" — confirm prod overrides it), dependency
-  audit, tighten CORS, penetration pass on auth + subscription endpoints,
-  Helius webhook secret enforcement verification (code exists).
+- **Security:** ✅ full-app audit (2026-07-12, five-surface pass) with
+  fixes landed:
+  - **Fail-closed prod config** (`ENVIRONMENT=production`): boot refuses a
+    default/weak `SECRET_KEY` and a missing `HELIUS_WEBHOOK_SECRET`; API
+    docs/openapi hidden in prod.
+  - **Webhook ingest hardened:** unauthenticated writes rejected in prod,
+    event array length-capped, NaN/Infinity rejected at parse; execution
+    price now taken from the bonding-curve leg (self-transfer/`max()`
+    inflation blocked). All mutating ops endpoints (`reprocess`,
+    `recalculate-scores`, `refresh-metadata`, `stats`, `registration`)
+    owner-gated with capped limits; 500s no longer echo internals.
+  - **Auth:** rate-limit key uses the trusted (rightmost) XFF hop
+    (spoof-proof); owner emails can't be self-registered; login timing
+    equalized (no account-enumeration oracle); purposeless JWTs rejected.
+  - **Trades:** signature uniqueness scoped per-user (no cross-user
+    suppression) + IntegrityError→409; base58 mint validation; amount
+    bounds.
+  - **Diagnostics:** `/health/redis-debug` + `/health/celery-debug`
+    owner-gated; stored task-failure text redacts api-key/credential URLs.
+  - **Shadow caps:** `max_position_usd` enforced on the accumulated
+    position (not per-trade); daily cap on gross buys (sells can't create
+    headroom).
+  - **Web:** CSP + `X-Frame-Options: DENY` + HSTS + `nosniff` +
+    `Referrer-Policy`; token images restricted to https.
+  - **Deps/secrets:** no secrets in repo or git history; the two npm
+    advisories (shell-quote/ws) are transitive dev tooling under the
+    unused Solana mobile adapter, not in the prod bundle.
+  - **Still open (documented follow-ups):** refresh-token revocation /
+    move refresh token to an httpOnly cookie; WS auth via one-time ticket
+    instead of `?token=`; enforce or delete the unused free-tier
+    signal/token caps; DB-level follow-limit constraint before live copy.
+    **Manual:** rotate the Helius key + Railway token exposed in chat.
 - **Observability:** ✅ Sentry release tagging (deploy SHA + environment);
   ✅ Celery task-failure alerting (Sentry CeleryIntegration in the
   worker/beat processes, release + environment tagged); still open:

@@ -6,7 +6,7 @@ import pytest
 
 def _record_trade(client, auth, signature):
     r = client.post("/api/v1/execute/trades", json={
-        "token_address": "TOK1", "trade_type": "buy",
+        "token_address": "MintTok1111111111111111111111111111111111111", "trade_type": "buy",
         "sol_amount": 1.0, "signature": signature,
     }, headers=auth)
     assert r.status_code == 201, r.text

@@ -1,15 +1,23 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import model_validator
 from typing import Optional
+
+INSECURE_SECRET_KEY = "change-me-in-production"
 
 
 class Settings(BaseSettings):
     APP_NAME: str = "Forge Terminal"
     API_V1_STR: str = "/api/v1"
 
+    # "production" turns on fail-closed hardening (see the validator below):
+    # a real SECRET_KEY and HELIUS_WEBHOOK_SECRET become mandatory and API
+    # docs are hidden. Railway/prod must set ENVIRONMENT=production.
+    ENVIRONMENT: str = "development"
+
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/forge_terminal"
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    SECRET_KEY: str = "change-me-in-production"
+    SECRET_KEY: str = INSECURE_SECRET_KEY
     ALGORITHM: str = "HS256"
     # Short-lived access + long-lived refresh (was a single 7-day access
     # token; shortened before taking payments).
@@ -73,6 +81,29 @@ class Settings(BaseSettings):
     ]
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+
+    @property
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT.lower() in {"production", "prod"}
+
+    @model_validator(mode="after")
+    def _enforce_production_secrets(self) -> "Settings":
+        """Fail closed in production: refuse to boot with a forgeable JWT
+        signing key or an unauthenticated webhook ingest. A misconfigured
+        prod deploy should crash loudly, not run exploitable."""
+        if self.is_production:
+            if self.SECRET_KEY == INSECURE_SECRET_KEY or len(self.SECRET_KEY) < 32:
+                raise ValueError(
+                    "SECRET_KEY must be set to a strong random value "
+                    "(>=32 chars) in production; refusing to start with the "
+                    "default/weak key."
+                )
+            if not self.HELIUS_WEBHOOK_SECRET:
+                raise ValueError(
+                    "HELIUS_WEBHOOK_SECRET must be set in production so the "
+                    "public webhook ingest rejects unauthenticated writes."
+                )
+        return self
 
 
 settings = Settings()

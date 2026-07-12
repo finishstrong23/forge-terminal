@@ -15,11 +15,26 @@ Usage:
     celery -A services.discovery.celery_app worker --beat --loglevel=info --concurrency=2
 """
 import os
+import re
 from datetime import datetime, timezone
 
 from celery import Celery
 from celery.schedules import crontab
 from celery.signals import beat_init, task_failure, worker_ready
+
+# Strip secrets that routinely appear in exception text (Helius api-key
+# query params, redis/postgres credentials in connection URLs) before it's
+# stored where an operator could read it.
+_SECRET_PATTERNS = [
+    (re.compile(r"(api-key=)[^&\s\"']+", re.I), r"\1<redacted>"),
+    (re.compile(r"(://[^:/\s]+:)[^@/\s]+(@)"), r"\1<redacted>\2"),
+]
+
+
+def _redact(text: str) -> str:
+    for pattern, repl in _SECRET_PATTERNS:
+        text = pattern.sub(repl, text)
+    return text
 
 # Task failures should reach Sentry, not just worker logs (M5 alerting).
 # CeleryIntegration hooks task_failure; release/environment match the API.
@@ -106,7 +121,7 @@ def _record_task_failure(sender=None, exception=None, **_kwargs):
             "celery:last_task_failure",
             {
                 "task": getattr(sender, "name", str(sender)),
-                "error": f"{type(exception).__name__}: {exception}"[:500],
+                "error": _redact(f"{type(exception).__name__}: {exception}")[:500],
                 "at": datetime.now(timezone.utc).isoformat(),
             },
             ttl=7 * 24 * 3600,

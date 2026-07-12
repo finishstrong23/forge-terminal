@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Float, Integer, JSON, ForeignKey, Index
+from sqlalchemy import Column, String, Boolean, DateTime, Float, Integer, JSON, ForeignKey, Index, UniqueConstraint
 from datetime import datetime, timezone
 
 from .base import Base, generate_uuid
@@ -39,7 +39,10 @@ class ExecutedTrade(Base):
     price_at_trade = Column(Float, nullable=True)
     slippage_pct = Column(Float, nullable=True)
     fee_amount = Column(Float, nullable=True)
-    signature = Column(String, nullable=True, unique=True, index=True)
+    # NOT globally unique: uniqueness is scoped to (user_id, signature) via
+    # __table_args__ so one user can't pre-claim a public on-chain signature
+    # and block another user from recording their own real trade.
+    signature = Column(String, nullable=True, index=True)
     status = Column(String, nullable=False, default="pending")
     error_message = Column(String, nullable=True)
     copy_subscription_id = Column(String, ForeignKey("copy_subscriptions.id"), nullable=True)
@@ -50,4 +53,5 @@ class ExecutedTrade(Base):
 
     __table_args__ = (
         Index("ix_executed_trade_user_time", "user_id", "created_at"),
+        UniqueConstraint("user_id", "signature", name="uq_executed_trade_user_signature"),
     )

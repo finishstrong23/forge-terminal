@@ -27,6 +27,7 @@ from core.database import get_db
 from core.redis_cache import cache
 from models.token import HeliusEvent, TokenSignal
 from models.wallet import WalletActivity
+from routes.auth import require_owner
 
 router = APIRouter()
 
@@ -222,14 +223,15 @@ def _redis_env_summary() -> dict:
 
 
 @router.get("/health/redis-debug")
-def redis_debug():
+def redis_debug(user=Depends(require_owner)):
     """
-    TEMPORARY M0 triage: low-level Redis connectivity report from inside
+    Owner-only M0 triage: low-level Redis connectivity report from inside
     this container. /health/pipeline can only say "not connected"; this
     says WHERE it dies — DNS resolution, raw TCP per address family
     (Railway private networking is IPv6-only, a classic mismatch), or
-    auth/protocol on an authenticated PING. Remove once the pipeline is
-    green. Secrets are masked (password length only).
+    auth/protocol on an authenticated PING. Owner-gated because it exposes
+    internal hostnames/IPs and connection details. Secrets are masked
+    (password length only).
     """
     raw_url = os.getenv("REDIS_URL", "")
     parsed = urlparse(raw_url)
@@ -316,13 +318,15 @@ def redis_debug():
 
 
 @router.get("/health/celery-debug")
-def celery_debug():
+def celery_debug(user=Depends(require_owner)):
     """
-    TEMPORARY M0 triage: is the Celery side alive? Asked over the broker,
+    Owner-only M0 triage: is the Celery side alive? Asked over the broker,
     so it needs no Railway log access. Reports live workers (broadcast
     ping), the task names each worker has registered, default-queue
-    backlog depth (grows when beat schedules but no worker consumes),
-    process-boot heartbeats, and the most recent task exception.
+    backlog depth, process-boot heartbeats, and the most recent task
+    exception. Owner-gated: worker hostnames, the task map, and captured
+    exception text (which can embed connection strings / api-key URLs) are
+    sensitive.
     """
     from services.discovery.celery_app import celery_app
 
