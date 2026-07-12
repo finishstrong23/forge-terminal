@@ -857,6 +857,48 @@ async def webhook_stats(db: Session = Depends(get_db)):
     }
 
 
+@router.post("/webhooks/helius/archive-stale")
+async def archive_stale_events(
+    before: str,
+    user=Depends(require_owner),
+    db: Session = Depends(get_db),
+):
+    """
+    Owner-only: mark unprocessed events received before the cutoff as
+    processed WITHOUT running them.
+
+    For the pre-outage backlog: process_event stamps wallet activity at
+    processing time, not event time, so replaying months-old events would
+    poison live leaderboard/scoring data. Archiving keeps the raw rows
+    for forensics but takes them out of the pipeline (and makes the
+    unprocessed_backlog health metric meaningful again).
+    """
+    try:
+        cutoff = datetime.fromisoformat(before)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="'before' must be an ISO date/datetime, e.g. 2026-07-12",
+        )
+    if cutoff.tzinfo is None:
+        cutoff = cutoff.replace(tzinfo=timezone.utc)
+
+    archived = (
+        db.query(HeliusEvent)
+        .filter(HeliusEvent.processed.is_(False), HeliusEvent.received_at < cutoff)
+        .update(
+            {
+                HeliusEvent.processed: True,
+                HeliusEvent.processed_at: datetime.now(timezone.utc),
+                HeliusEvent.processing_error: "archived: pre-outage backlog (never processed)",
+            },
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    return {"success": True, "archived": archived, "cutoff": cutoff.isoformat()}
+
+
 @router.post("/webhooks/helius/reprocess")
 async def reprocess_events(
     limit: int = 100,

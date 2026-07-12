@@ -92,6 +92,43 @@ def test_ingest_accepts_raw_and_bearer_auth_headers(client, monkeypatch):
     assert rejected.status_code == 401
 
 
+def test_archive_stale_marks_only_pre_cutoff_events(client, db):
+    from datetime import datetime, timedelta, timezone
+
+    from models.token import HeliusEvent
+
+    now = datetime.now(timezone.utc)
+    db.add(HeliusEvent(event_type="SWAP", signature="stale-1", raw_data={},
+                       event_timestamp=now - timedelta(days=60),
+                       received_at=now - timedelta(days=60), processed=False))
+    db.add(HeliusEvent(event_type="SWAP", signature="fresh-1", raw_data={},
+                       event_timestamp=now, received_at=now, processed=False))
+    db.commit()
+
+    # Unauthenticated → rejected.
+    assert client.post(
+        "/api/v1/webhooks/helius/archive-stale?before=2026-01-01"
+    ).status_code == 401
+
+    # Owner account (finishstrong23@gmail.com is in OWNER_EMAILS).
+    token = client.post(
+        "/api/v1/auth/register",
+        json={"email": "finishstrong23@gmail.com", "password": "ownerpass123"},
+    ).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    cutoff = (now - timedelta(days=1)).date().isoformat()
+    r = client.post(
+        f"/api/v1/webhooks/helius/archive-stale?before={cutoff}", headers=headers
+    )
+    assert r.status_code == 200 and r.json()["archived"] == 1
+
+    stale = db.query(HeliusEvent).filter_by(signature="stale-1").one()
+    fresh = db.query(HeliusEvent).filter_by(signature="fresh-1").one()
+    assert stale.processed is True and "archived" in stale.processing_error
+    assert fresh.processed is False
+
+
 def test_helius_rpc_url_derived_from_api_key(monkeypatch):
     from services.discovery.token_discovery import helius_rpc_url
 
