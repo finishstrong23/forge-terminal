@@ -9,6 +9,7 @@ import { apiUrl } from "./api";
 import type { ApiTokenResponse, ApiUser } from "./types";
 
 const TOKEN_KEY = "forge_token";
+const REFRESH_KEY = "forge_refresh";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -20,9 +21,42 @@ export function setToken(token: string): void {
   window.localStorage.setItem(TOKEN_KEY, token);
 }
 
+/** Persist both halves of a token pair (refresh half may be absent). */
+export function setSession(tokens: ApiTokenResponse): void {
+  setToken(tokens.access_token);
+  if (typeof window === "undefined") return;
+  if (tokens.refresh_token) {
+    window.localStorage.setItem(REFRESH_KEY, tokens.refresh_token);
+  }
+}
+
 export function clearToken(): void {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(TOKEN_KEY);
+  window.localStorage.removeItem(REFRESH_KEY);
+}
+
+/**
+ * Exchange the stored refresh token for a new pair; null when there is no
+ * refresh token or it was rejected (caller signs the user out).
+ */
+export async function apiRefresh(): Promise<ApiTokenResponse | null> {
+  if (typeof window === "undefined") return null;
+  const refreshToken = window.localStorage.getItem(REFRESH_KEY);
+  if (!refreshToken) return null;
+  try {
+    const response = await fetch(apiUrl("/api/v1/auth/refresh"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!response.ok) return null;
+    const tokens = (await response.json()) as ApiTokenResponse;
+    setSession(tokens);
+    return tokens;
+  } catch {
+    return null;
+  }
 }
 
 /** Authorization header for authenticated fetches ({} when signed out). */

@@ -29,8 +29,10 @@ from core.database import get_db
 from core.redis_cache import cache
 from core.security import (
     create_access_token,
+    create_refresh_token,
     create_token,
     decode_access_token,
+    decode_refresh_token,
     decode_token,
     hash_password,
     verify_password,
@@ -38,6 +40,7 @@ from core.security import (
 from models.user import User
 from schemas.auth import (
     ForgotPasswordRequest,
+    RefreshRequest,
     LoginRequest,
     RegisterRequest,
     ResetPasswordRequest,
@@ -126,6 +129,7 @@ def require_owner(user: User = Depends(get_current_user)) -> User:
 def _token_response(user: User) -> TokenResponse:
     return TokenResponse(
         access_token=create_access_token(user.id),
+        refresh_token=create_refresh_token(user.id),
         user=UserResponse.model_validate(user),
     )
 
@@ -180,6 +184,23 @@ def login(
 @router.get("/me", response_model=UserResponse)
 def me(current_user: User = Depends(get_current_user)) -> UserResponse:
     return UserResponse.model_validate(current_user)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+def refresh(body: RefreshRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    """
+    Exchange a valid refresh token for a fresh access+refresh pair
+    (rotation: the response's refresh token replaces the one sent).
+    Stateless JWTs — a stolen refresh token stays valid until expiry;
+    revocation storage is a known follow-up before high-value accounts.
+    """
+    user_id = decode_refresh_token(body.refresh_token)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    return _token_response(user)
 
 
 @router.post("/forgot-password")

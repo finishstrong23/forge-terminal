@@ -127,6 +127,7 @@ export interface ApiUser {
 export interface ApiTokenResponse {
   access_token: string;
   token_type: string;
+  refresh_token?: string | null;
   user: ApiUser;
 }
 

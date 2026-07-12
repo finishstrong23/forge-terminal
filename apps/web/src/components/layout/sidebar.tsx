@@ -11,6 +11,8 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  CircleHelp,
+  Crown,
   Flame,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -44,6 +46,18 @@ const navItems = [
     href: "/portfolio",
     icon: LayoutDashboard,
     description: "Positions & PnL",
+  },
+  {
+    label: "Pricing",
+    href: "/pricing",
+    icon: Crown,
+    description: "Free vs Pro",
+  },
+  {
+    label: "How it works",
+    href: "/how-it-works",
+    icon: CircleHelp,
+    description: "Discover → Shadow-follow → Execute",
   },
   {
     label: "Settings",

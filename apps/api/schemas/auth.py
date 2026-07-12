@@ -6,6 +6,7 @@ Shared between:
   GET /api/v1/auth/me
 """
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -45,4 +46,11 @@ class UserResponse(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    # Long-lived (30d) purpose-scoped token; exchange at /auth/refresh for a
+    # new pair when the 24h access token expires.
+    refresh_token: Optional[str] = None
     user: UserResponse
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str

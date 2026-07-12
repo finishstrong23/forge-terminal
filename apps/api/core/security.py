@@ -80,3 +80,13 @@ def create_access_token(subject: str, expires_minutes: Optional[int] = None) -> 
 
 def decode_access_token(token: str) -> Optional[str]:
     return decode_token(token, "access")
+
+
+def create_refresh_token(subject: str) -> str:
+    return create_token(
+        subject, "refresh", settings.REFRESH_TOKEN_EXPIRE_MINUTES
+    )
+
+
+def decode_refresh_token(token: str) -> Optional[str]:
+    return decode_token(token, "refresh")

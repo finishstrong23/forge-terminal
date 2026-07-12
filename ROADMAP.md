@@ -120,7 +120,9 @@ sellable product without touching custody/execution risk.
 - ✅ Auth hardening: per-IP throttling on register/login/forgot (Redis
   fixed-window, fail-open), password reset via purpose-scoped JWT links,
   email verification (migration 002 + emailed link + login-page banner).
-  Still open: refresh tokens or a shorter access-token TTL than 7 days.
+  ✅ Access tokens now 24h with 30-day rotating refresh tokens
+  (`POST /auth/refresh`); frontend refreshes transparently. Known
+  follow-up: refresh-token revocation storage.
 - ✅ Settings page: account, plan with upgrade (checkout) or manage
   billing (portal), sign out, checkout success/cancel banners.
 
@@ -142,7 +144,9 @@ visible value early.
   `GET /api/v1/execute/price`. `max_position_usd` is now ENFORCED in
   shadow mode (usd_value stamped on ledger rows; cap skips carry a
   reason). ✅ Token-level prices (Jupiter batch lookup, request-driven,
-  60s cache) mark open positions to market. Daily loss cap still pending.
+  60s cache) mark open positions to market. ✅ Daily loss cap enforced in
+  shadow mode (buys skip once today's net simulated USD outflow would
+  exceed `daily_loss_cap_usd`; sells never blocked).
 - ✅ **Manual swaps (buy-side v1):** Execute page swap ticket — live
   Jupiter quote (price impact, route), slippage presets, swap tx built
   server-side (`POST /execute/swap-transaction`, keys never leave the

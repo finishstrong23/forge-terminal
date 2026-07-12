@@ -18,11 +18,12 @@ import React, {
 
 import {
   apiLogin,
+  apiRefresh,
   apiRegister,
   clearToken,
   fetchMe,
   getToken,
-  setToken,
+  setSession,
 } from "@/lib/auth";
 import type { ApiUser } from "@/lib/types";
 
@@ -54,7 +55,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
       return;
     }
+    // Expired access token? Try the refresh token once before giving up —
+    // access tokens now live 24h, refresh tokens 30d.
     fetchMe()
+      .catch(async () => {
+        const refreshed = await apiRefresh();
+        if (!refreshed) throw new Error("session expired");
+        return fetchMe();
+      })
       .then((me) => {
         if (!unmounted) setUser(me);
       })
@@ -73,7 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (email: string, password: string, mode: AuthMode) => {
       const call = mode === "register" ? apiRegister : apiLogin;
       const result = await call(email, password);
-      setToken(result.access_token);
+      setSession(result);
       setUser(result.user);
     },
     [],

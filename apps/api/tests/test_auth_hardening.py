@@ -145,3 +145,42 @@ def test_email_verification_flow(client, db, sent_emails):
     assert client.get(
         f"/api/v1/auth/verify-email?token={body['access_token']}"
     ).status_code == 400
+
+
+def test_refresh_token_flow(client, db):
+    r = client.post(
+        "/api/v1/auth/register",
+        json={"email": "refresh@example.com", "password": "password123"},
+    )
+    body = r.json()
+    assert body["refresh_token"]
+
+    # A valid refresh token yields a fresh working pair (rotation).
+    r2 = client.post(
+        "/api/v1/auth/refresh", json={"refresh_token": body["refresh_token"]}
+    )
+    assert r2.status_code == 200
+    pair = r2.json()
+    assert pair["access_token"] and pair["refresh_token"]
+    me = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {pair['access_token']}"},
+    )
+    assert me.status_code == 200
+
+    # Purpose scoping: an access token can't refresh...
+    r3 = client.post(
+        "/api/v1/auth/refresh", json={"refresh_token": pair["access_token"]}
+    )
+    assert r3.status_code == 401
+    # ...and a refresh token can't authenticate a request.
+    me2 = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {pair['refresh_token']}"},
+    )
+    assert me2.status_code == 401
+
+    # Garbage is rejected cleanly.
+    assert client.post(
+        "/api/v1/auth/refresh", json={"refresh_token": "not-a-token"}
+    ).status_code == 401

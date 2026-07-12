@@ -113,6 +113,50 @@ def test_ledger_filters_and_auth(followed):
     assert client.get("/api/v1/copy/trades").status_code == 401
 
 
+def test_daily_loss_cap_blocks_further_buys(client, db, seed_activity, monkeypatch):
+    """Buys stop once today's net simulated outflow would exceed the cap;
+    sells are never blocked (they reduce exposure)."""
+    from models.token import TokenSignal
+    from models.wallet import Wallet
+    import services.copy.shadow_recorder as sr
+
+    monkeypatch.setattr(sr, "get_sol_price_usd", lambda: 100.0)
+    now = datetime.now(timezone.utc)
+    # Follow endpoint requires the wallet to have recorded activity.
+    seed_activity("walletB", "TOKC", "buy", 1.0, "cap-pre", mins_ago=30)
+    db.add(Wallet(address="walletB", sustainability_score=80.0, sustainability_grade="A"))
+    db.add(TokenSignal(id="ts-cap", token_address="TOKC", symbol="TOKC",
+                       scan_timestamp=now, rug_risk_score=10.0, momentum_score=90.0,
+                       is_honeypot=False))
+    db.commit()
+
+    r = client.post("/api/v1/auth/register",
+                    json={"email": "cap@example.com", "password": "password123"})
+    auth = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    r = client.post("/api/v1/copy/subscriptions",
+                    json={"wallet_address": "walletB", "daily_loss_cap_usd": 100.0},
+                    headers=auth)
+    assert r.status_code == 201, r.text
+
+    fresh = datetime.now(timezone.utc) + timedelta(seconds=1)
+    seed_activity("walletB", "TOKC", "buy", 0.6, "cap-1", ts=fresh)  # $60 -> ok
+    seed_activity("walletB", "TOKC", "buy", 0.6, "cap-2",
+                  ts=fresh + timedelta(seconds=1))  # $120 total -> blocked
+    seed_activity("walletB", "TOKC", "sell", 0.2, "cap-3",
+                  ts=fresh + timedelta(seconds=2))  # sells never blocked
+    db.commit()
+
+    result = sr.record_shadow_trades(db)
+    db.commit()
+    assert result["recorded"] == 2 and result["skipped"] == 1
+
+    trades = client.get("/api/v1/copy/trades", headers=auth).json()["trades"]
+    skipped = [t for t in trades if t["status"] == "skipped"]
+    assert len(skipped) == 1
+    assert "daily loss cap" in skipped[0]["error_message"]
+    assert skipped[0]["trade_type"] == "buy"
+
+
 def test_celery_task_eager(followed):
     from services.discovery.celery_app import celery_app
     import services.discovery.tasks as tasks

@@ -15,10 +15,12 @@ Each activity produces one ExecutedTrade per subscription, either:
 
 Filters applied: token_blacklist, honeypot (latest TokenSignal),
 min_sustainability_score (persisted Wallet score; not applied until the
-wallet has been scored), and max_position_usd (M3 price feed: usd_value =
-sol_amount * SOL/USD; when the price feed is down, rows record with NULL
-usd_value and the USD cap is not enforced — availability over false
-blocking). daily_loss_cap_usd still applies at live execution only.
+wallet has been scored), max_position_usd, and daily_loss_cap_usd (buys
+that would push today's cumulative net USD outflow — simulated buys minus
+sells since UTC midnight — past the cap are skipped; sells are never
+blocked since they reduce exposure). USD-based caps need the M3 price
+feed: when it is down, rows record with NULL usd_value and USD caps are
+not enforced — availability over false blocking.
 
 Idempotency: signature = "shadow:{subscription_id}:{event_signature}" is
 unique on executed_trades, so the beat task can rescan a lookback window
@@ -28,6 +30,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models.token import TokenSignal
@@ -70,6 +73,7 @@ def _skip_reason(
     signal: Optional[TokenSignal],
     wallet_score: Optional[float],
     usd_value: Optional[float],
+    daily_net_outflow: float = 0.0,
 ) -> Optional[str]:
     if sub.token_blacklist and activity.token_address in sub.token_blacklist:
         return "token blacklisted by subscription"
@@ -91,6 +95,16 @@ def _skip_reason(
     ):
         return (
             f"position ${usd_value:.2f} exceeds cap ${sub.max_position_usd:.2f}"
+        )
+    if (
+        sub.daily_loss_cap_usd is not None
+        and activity.activity_type == "buy"
+        and usd_value is not None
+        and daily_net_outflow + usd_value > sub.daily_loss_cap_usd
+    ):
+        return (
+            f"daily loss cap: ${daily_net_outflow + usd_value:.2f} net outflow "
+            f"today would exceed ${sub.daily_loss_cap_usd:.2f}"
         )
     return None
 
@@ -141,6 +155,31 @@ def record_shadow_trades(
     # One price lookup per run; None means USD caps can't be enforced this run.
     sol_price = get_sol_price_usd()
 
+    # Today's simulated net USD outflow per subscription (buys - sells since
+    # UTC midnight) seeds the daily-loss-cap check; the loop below keeps the
+    # running total current as it records new rows.
+    today_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    net_outflow: Dict[str, float] = {}
+    outflow_rows = (
+        db.query(
+            ExecutedTrade.copy_subscription_id,
+            ExecutedTrade.trade_type,
+            func.coalesce(func.sum(ExecutedTrade.usd_value), 0.0),
+        )
+        .filter(
+            ExecutedTrade.copy_subscription_id.in_([s.id for s in subs]),
+            ExecutedTrade.status == "simulated",
+            ExecutedTrade.executed_at >= today_start,
+        )
+        .group_by(ExecutedTrade.copy_subscription_id, ExecutedTrade.trade_type)
+        .all()
+    )
+    for sub_id, trade_type, usd_sum in outflow_rows:
+        sign = 1.0 if trade_type == "buy" else -1.0
+        net_outflow[sub_id] = net_outflow.get(sub_id, 0.0) + sign * float(usd_sum or 0)
+
     # One IN query resolves which candidate rows already exist.
     candidates = []
     for activity in activities:
@@ -174,7 +213,8 @@ def record_shadow_trades(
             else None
         )
         reason = _skip_reason(
-            sub, activity, signal, scores.get(sub.wallet_address), usd_value
+            sub, activity, signal, scores.get(sub.wallet_address), usd_value,
+            net_outflow.get(sub.id, 0.0),
         )
         db.add(
             ExecutedTrade(
@@ -198,6 +238,9 @@ def record_shadow_trades(
             skipped += 1
         else:
             recorded += 1
+            if usd_value is not None:
+                delta = usd_value if activity.activity_type == "buy" else -usd_value
+                net_outflow[sub.id] = net_outflow.get(sub.id, 0.0) + delta
 
     db.flush()
     if recorded or skipped:
