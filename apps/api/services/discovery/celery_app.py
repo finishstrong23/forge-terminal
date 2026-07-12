@@ -136,6 +136,10 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.refresh_sol_price",
         "schedule": 60.0,  # every 60 seconds
     },
+    "enrich-token-metadata": {
+        "task": "tasks.enrich_token_metadata",
+        "schedule": 60.0,  # every 60 seconds
+    },
     "check-trade-confirmations": {
         "task": "tasks.check_trade_confirmations",
         "schedule": 120.0,  # every 2 minutes

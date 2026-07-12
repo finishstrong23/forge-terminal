@@ -371,40 +371,62 @@ class HeliusWebhookProcessor:
             self.db.commit()
             return None
 
+    def _apply_das_metadata(self, signal: TokenSignal, das: Dict) -> None:
+        """Apply DAS-resolved name/symbol/image to a signal."""
+        if das.get("symbol"):
+            signal.symbol = das["symbol"]
+        if das.get("name"):
+            signal.name = das["name"]
+        signal.token_metadata = {
+            **(signal.token_metadata if isinstance(signal.token_metadata, dict) else {}),
+            **{k: v for k, v in das.items() if v},
+        }
+
     def _get_or_create_signal(self, mint_address: str, event_data: Dict) -> TokenSignal:
         """
         Get existing signal or create new one
         """
+        from services.discovery.token_metadata import fetch_das_metadata
+
         # Try to find existing signal
         signal = self.db.query(TokenSignal).filter(
             TokenSignal.token_address == mint_address
         ).order_by(TokenSignal.scan_timestamp.desc()).first()
 
         if signal:
-            # Update metadata if still unknown
-            if signal.symbol == "UNKNOWN" or signal.name == "Unknown Token":
-                metadata = fetch_pump_fun_metadata_sync(mint_address)
-                if metadata:
-                    signal.symbol = metadata.get("symbol", signal.symbol)
-                    signal.name = metadata.get("name", signal.name)
-                    signal.token_metadata = metadata
-                    signal.dev_wallet = metadata.get("creator")
-                    signal.has_graduated = metadata.get("complete", False)
-                    if metadata.get("market_cap"):
-                        signal.market_cap = metadata["market_cap"]
+            # Update metadata if still unknown: DAS first (reliable, cheap),
+            # pump.fun as fallback for the extra fields it carries.
+            if signal.symbol in (None, "UNKNOWN") or signal.name in (None, "Unknown Token"):
+                das = fetch_das_metadata([mint_address]).get(mint_address)
+                if das:
+                    self._apply_das_metadata(signal, das)
+                else:
+                    metadata = fetch_pump_fun_metadata_sync(mint_address)
+                    if metadata:
+                        signal.symbol = metadata.get("symbol", signal.symbol)
+                        signal.name = metadata.get("name", signal.name)
+                        signal.token_metadata = metadata
+                        signal.dev_wallet = metadata.get("creator")
+                        signal.has_graduated = metadata.get("complete", False)
+                        if metadata.get("market_cap"):
+                            signal.market_cap = metadata["market_cap"]
             return signal
 
-        # Fetch metadata from Pump.fun API for new tokens
-        metadata = fetch_pump_fun_metadata_sync(mint_address)
+        # New token: DAS first, pump.fun fallback (rate limited).
+        das = fetch_das_metadata([mint_address]).get(mint_address)
+        metadata = None if das else fetch_pump_fun_metadata_sync(mint_address)
 
-        # Create new signal with fetched metadata
         symbol = "UNKNOWN"
         name = "Unknown Token"
         dev_wallet = None
         has_graduated = False
         market_cap = None
 
-        if metadata:
+        if das:
+            symbol = das.get("symbol") or symbol
+            name = das.get("name") or name
+            metadata = das
+        elif metadata:
             symbol = metadata.get("symbol", "UNKNOWN")
             name = metadata.get("name", "Unknown Token")
             dev_wallet = metadata.get("creator")
@@ -472,6 +494,23 @@ class HeliusWebhookProcessor:
         # Increment counters and record wallet activity
         if event_type == 'SWAP':
             is_buy = self._is_buy_event(event_data)
+
+            # Live execution price: SOL moved / tokens moved in THIS swap.
+            # Pre-graduation tokens trade only on the bonding curve, so no
+            # external price oracle covers them — the swap itself is the
+            # freshest price there is.
+            token_amount = self._extract_token_amount(event_data, signal.token_address)
+            if sol_amount and token_amount:
+                try:
+                    from services.execution.price_feed import get_sol_price_usd
+
+                    sol_usd = get_sol_price_usd()
+                    if sol_usd:
+                        signal.price_usd = (sol_amount / token_amount) * sol_usd
+                        # Pump.fun mints a fixed 1B supply per token.
+                        signal.market_cap = signal.price_usd * 1_000_000_000
+                except Exception:
+                    pass  # price display is best-effort; never break ingestion
 
             # Extract the user wallet for clustering
             wallet_address = wallet_clustering.extract_wallet_from_event(event_data, is_buy)
@@ -554,6 +593,21 @@ class HeliusWebhookProcessor:
                         return amount / 1e9  # Convert lamports to SOL
             return None
         except:
+            return None
+
+    def _extract_token_amount(self, event_data: Dict, mint: Optional[str]) -> Optional[float]:
+        """Tokens of `mint` moved in this swap (Helius enhanced format)."""
+        if not mint:
+            return None
+        try:
+            for transfer in event_data.get('tokenTransfers') or []:
+                if transfer.get('mint') != mint:
+                    continue
+                amount = transfer.get('tokenAmount')
+                if isinstance(amount, (int, float)) and amount > 0:
+                    return float(amount)
+            return None
+        except Exception:
             return None
 
     def _is_buy_event(self, event_data: Dict) -> bool:

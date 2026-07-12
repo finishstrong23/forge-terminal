@@ -26,6 +26,7 @@ export interface TokenSignal {
   id: string;
   symbol: string;
   name: string;
+  image_uri: string | null;
   token_address: string;
   price_usd: number;
   market_cap: number;
@@ -68,11 +69,27 @@ const columns: ColumnDef<TokenSignal>[] = [
     accessorKey: "symbol",
     header: "Token",
     cell: ({ row }) => (
-      <div className="flex flex-col">
-        <span className="font-medium text-foreground">{row.original.symbol}</span>
-        <span className="text-xs text-muted-foreground truncate max-w-[120px]">
-          {row.original.name}
-        </span>
+      <div className="flex items-center gap-2">
+        {/* Token logos live on arbitrary hosts (IPFS gateways etc.), so a
+            plain img with a hide-on-error fallback beats next/image here. */}
+        {row.original.image_uri && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={row.original.image_uri}
+            alt=""
+            className="h-6 w-6 shrink-0 rounded-full bg-surface object-cover"
+            loading="lazy"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+            }}
+          />
+        )}
+        <div className="flex flex-col">
+          <span className="font-medium text-foreground">{row.original.symbol}</span>
+          <span className="text-xs text-muted-foreground truncate max-w-[120px]">
+            {row.original.name}
+          </span>
+        </div>
       </div>
     ),
     size: 140,

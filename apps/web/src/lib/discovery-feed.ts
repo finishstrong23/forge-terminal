@@ -68,6 +68,7 @@ export function normalizeToken(t: ApiTokenFeedItem | null | undefined): TokenSig
     token_address: t.token_address ?? "",
     symbol: t.symbol ?? "UNKNOWN",
     name: t.name ?? "Unknown",
+    image_uri: t.image_uri ?? null,
     price_usd: t.price_usd ?? 0,
     market_cap: t.market_cap ?? 0,
     volume_1h: t.volume_1h ?? 0,

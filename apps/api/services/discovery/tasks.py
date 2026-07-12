@@ -329,6 +329,71 @@ def record_shadow_trades():
 
 # ==================== EXECUTION ====================
 
+@celery_app.task(name="tasks.enrich_token_metadata")
+def enrich_token_metadata():
+    """
+    Periodic task: backfill name/symbol/image for tokens still UNKNOWN.
+    Runs every 60 seconds via Celery Beat; resolves up to 200 recent
+    tokens per pass via Helius DAS getAssetBatch (P1 credibility).
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import or_
+
+    from core.heartbeat import beat
+    from models.token import TokenSignal
+    from services.discovery.token_metadata import fetch_das_metadata
+
+    db = _get_db()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+        rows = (
+            db.query(TokenSignal)
+            .filter(
+                TokenSignal.scan_timestamp >= cutoff,
+                or_(
+                    TokenSignal.symbol.is_(None),
+                    TokenSignal.symbol == "UNKNOWN",
+                    TokenSignal.name.is_(None),
+                    TokenSignal.name == "Unknown Token",
+                ),
+            )
+            .order_by(TokenSignal.scan_timestamp.desc())
+            .limit(200)
+            .all()
+        )
+        resolved = fetch_das_metadata(
+            list({r.token_address for r in rows if r.token_address})
+        )
+        updated = 0
+        for row in rows:
+            das = resolved.get(row.token_address)
+            if not das:
+                continue
+            if das.get("symbol"):
+                row.symbol = das["symbol"]
+            if das.get("name"):
+                row.name = das["name"]
+            row.token_metadata = {
+                **(row.token_metadata if isinstance(row.token_metadata, dict) else {}),
+                **{k: v for k, v in das.items() if v},
+            }
+            updated += 1
+        db.commit()
+        beat("enrich_token_metadata")
+        if updated:
+            # Names changed under cached feed pages — serve fresh ones.
+            from core.redis_cache import cache
+            cache.invalidate_pattern("signals:*")
+        return {"status": "completed", "candidates": len(rows), "updated": updated}
+    except Exception as exc:
+        db.rollback()
+        print(f"Failed to enrich token metadata: {exc}")
+        return {"status": "error", "error": str(exc)}
+    finally:
+        db.close()
+
+
 @celery_app.task(name="tasks.refresh_sol_price")
 def refresh_sol_price():
     """

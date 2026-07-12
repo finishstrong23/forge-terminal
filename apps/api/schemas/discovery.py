@@ -32,6 +32,7 @@ class TokenFeedItem(BaseModel):
     token_address: Optional[str] = None
     symbol: Optional[str] = None
     name: Optional[str] = None
+    image_uri: Optional[str] = None
     scan_timestamp: datetime
     age_minutes: Optional[float] = None
     age_seconds: Optional[int] = None
@@ -52,11 +53,13 @@ class TokenFeedItem(BaseModel):
     @classmethod
     def from_signal(cls, s: TokenSignal) -> "TokenFeedItem":
         age_seconds = int(s.age_minutes * 60) if s.age_minutes is not None else None
+        meta = s.token_metadata if isinstance(s.token_metadata, dict) else {}
         return cls(
             id=s.id,
             token_address=s.token_address,
             symbol=s.symbol,
             name=s.name,
+            image_uri=meta.get("image_uri"),
             scan_timestamp=s.scan_timestamp,
             age_minutes=s.age_minutes,
             age_seconds=age_seconds,

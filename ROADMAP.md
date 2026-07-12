@@ -1,9 +1,24 @@
 # Forge Terminal — Launch Roadmap
 
-Last updated: 2026-07-07. Launch verification lives in [TESTING.md](./TESTING.md). This is the working plan from "code
+Last updated: 2026-07-12. Launch verification lives in [TESTING.md](./TESTING.md). This is the working plan from "code
 exists" to "people pay for it." Milestones are ordered by dependency, not
 calendar. Each has an explicit exit test — a milestone isn't done until its
 exit test passes in **production**, not localhost.
+
+## Business phases (post-M0, 2026-07-12)
+
+M0 closed 2026-07-12: full pipeline live in prod (webhooks, scoring,
+beat tasks, prices; `/health/pipeline` green). The path to revenue:
+
+| Phase | Goal | Exit test | Status |
+|---|---|---|---|
+| **P1 Credibility** | Feed shows real names/images/prices (DAS metadata + execution-price from swaps) + uptime monitor | A stranger can't tell the feed from paid competitors' | code shipped, verifying in prod |
+| **P2 Prove it** | A week of accumulated wallet scores; TESTING.md A–G pass; M3 exit test (dust swap → position) | Owner uses it daily and trusts it | waiting on data |
+| **P3 Intelligence Beta** | Stripe live (≈$49/mo Pro), Helius paid tier, lawyer-reviewed legal, soft launch to memecoin communities | 10 paying strangers | blocked on P2 + legal review |
+| **P4 Auto-copy** | Automated copy execution w/ kill switches + shadow-vs-live accuracy report (per-trade fees) | See M4 exit test | deferred until P3 revenue |
+
+Running cost: ~$5/mo now; ~$55–75/mo at P3 (Helius Developer ~$49 +
+domain + Railway overage). Break-even ≈ 2 Pro subscribers.
 
 ## Where things stand
 

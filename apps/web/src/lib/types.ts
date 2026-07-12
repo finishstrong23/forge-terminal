@@ -12,6 +12,7 @@ export interface ApiTokenFeedItem {
   token_address: string | null;
   symbol: string | null;
   name: string | null;
+  image_uri: string | null;
   scan_timestamp: string; // ISO 8601 datetime
   age_minutes: number | null;
   age_seconds: number | null;

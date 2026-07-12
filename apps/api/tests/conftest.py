@@ -44,6 +44,9 @@ def _no_live_prices(monkeypatch):
     monkeypatch.setattr(
         "services.execution.token_meta.fetch_token_decimals", lambda mint: None
     )
+    monkeypatch.setattr(
+        "services.discovery.token_metadata.fetch_das_metadata", lambda mints: {}
+    )
 
 
 @pytest.fixture()
