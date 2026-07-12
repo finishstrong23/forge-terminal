@@ -159,4 +159,59 @@ def registration_status() -> dict:
         "webhook_auth_secret_set": bool(settings.HELIUS_WEBHOOK_SECRET),
         "target_url": target_webhook_url(),
         "last_attempt": cache.get(REGISTRATION_CACHE_KEY),
+        # Deliveries rejected by the ingest endpoint's auth check —
+        # non-zero means Helius IS sending but the secret doesn't match.
+        "rejected_deliveries": cache.get("helius:webhook_auth_failures"),
     }
+
+
+def _summarize_webhook(webhook: dict, ours: bool) -> dict:
+    """Webhook config as Helius stores it, safe for display: authHeader is
+    reduced to a length, and foreign webhook URLs to their host."""
+    addresses = webhook.get("accountAddresses") or []
+    url = webhook.get("webhookURL", "")
+    if not ours:
+        # Foreign URLs can embed tokens in path/query — host is enough.
+        url = url.split("//", 1)[-1].split("/", 1)[0] if url else ""
+    return {
+        "webhook_id": webhook.get("webhookID"),
+        "webhook_url" if ours else "webhook_host": url,
+        "webhook_type": webhook.get("webhookType"),
+        "transaction_types": webhook.get("transactionTypes"),
+        "account_addresses_count": len(addresses),
+        "account_addresses_sample": addresses[:3],
+        "auth_header_length": len(webhook.get("authHeader") or ""),
+        "txn_status": webhook.get("txnStatus"),
+    }
+
+
+async def live_account_view() -> dict:
+    """
+    Fetch the account's webhooks from Helius RIGHT NOW — what Helius has
+    actually stored, not what we last sent. For diagnosing 'registered but
+    silent' deliveries.
+    """
+    api_key = settings.HELIUS_API_KEY
+    if not api_key:
+        return {"error": "HELIUS_API_KEY not set"}
+    target_url = target_webhook_url()
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            listing = await client.get(
+                f"{HELIUS_API_BASE}/webhooks", params={"api-key": api_key}
+            )
+            if listing.status_code != 200:
+                return {
+                    "error": f"Helius list returned {listing.status_code}",
+                    "detail": listing.text[:300],
+                }
+            webhooks = listing.json() or []
+            ours = [w for w in webhooks if w.get("webhookURL") == target_url]
+            others = [w for w in webhooks if w.get("webhookURL") != target_url]
+            return {
+                "total_webhooks": len(webhooks),
+                "our_webhook": _summarize_webhook(ours[0], ours=True) if ours else None,
+                "other_webhooks": [_summarize_webhook(w, ours=False) for w in others],
+            }
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}

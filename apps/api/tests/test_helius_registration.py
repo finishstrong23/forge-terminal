@@ -56,13 +56,40 @@ def test_registration_status_endpoint_is_public_and_masked(client):
         "webhook_auth_secret_set",
         "target_url",
         "last_attempt",
+        "rejected_deliveries",
     }
     assert isinstance(body["helius_api_key_set"], bool)
+
+
+def test_registration_live_view_reports_missing_key(client, monkeypatch):
+    monkeypatch.setattr(settings, "HELIUS_API_KEY", None)
+    r = client.get("/api/v1/webhooks/helius/registration?live=true")
+    assert r.status_code == 200
+    assert r.json()["live"] == {"error": "HELIUS_API_KEY not set"}
 
 
 def test_manual_register_requires_owner_auth(client):
     r = client.post("/api/v1/webhooks/helius/register")
     assert r.status_code == 401
+
+
+def test_ingest_accepts_raw_and_bearer_auth_headers(client, monkeypatch):
+    monkeypatch.setattr(settings, "HELIUS_WEBHOOK_SECRET", "s3cret")
+
+    ok_raw = client.post(
+        "/api/v1/webhooks/helius", json=[], headers={"Authorization": "s3cret"}
+    )
+    assert ok_raw.status_code == 200 and ok_raw.json()["events_received"] == 0
+
+    ok_bearer = client.post(
+        "/api/v1/webhooks/helius", json=[], headers={"Authorization": "Bearer s3cret"}
+    )
+    assert ok_bearer.status_code == 200
+
+    rejected = client.post(
+        "/api/v1/webhooks/helius", json=[], headers={"Authorization": "wrong"}
+    )
+    assert rejected.status_code == 401
 
 
 def test_helius_rpc_url_derived_from_api_key(monkeypatch):

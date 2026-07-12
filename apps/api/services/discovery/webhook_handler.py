@@ -687,6 +687,28 @@ class HeliusWebhookProcessor:
 # discovery services, so no cycle.
 from routes.auth import require_owner
 
+AUTH_FAILURE_CACHE_KEY = "helius:webhook_auth_failures"
+
+
+def _record_webhook_auth_failure(had_header: bool) -> None:
+    """Count rejected deliveries in Redis: distinguishes 'Helius sends but
+    we 401 it' (secret mismatch) from 'Helius never sends'. Best-effort."""
+    try:
+        from core.redis_cache import cache as _cache
+
+        current = _cache.get(AUTH_FAILURE_CACHE_KEY) or {}
+        _cache.set(
+            AUTH_FAILURE_CACHE_KEY,
+            {
+                "count": int(current.get("count", 0)) + 1,
+                "last_at": datetime.now(timezone.utc).isoformat(),
+                "last_had_header": had_header,
+            },
+            ttl=7 * 24 * 3600,
+        )
+    except Exception:
+        pass
+
 @router.post("/webhooks/helius")
 async def helius_webhook(
     request: Request,
@@ -708,15 +730,20 @@ async def helius_webhook(
     3. Returns 200 OK fast
     4. Processes event in background
     """
-    # Verify Helius webhook authorization (bearer-token in Authorization header)
+    # Verify Helius webhook authorization (Authorization header carries the
+    # webhook's configured authHeader — accept it raw or Bearer-prefixed).
     expected_secret = settings.HELIUS_WEBHOOK_SECRET
     if not expected_secret:
         print("⚠️  HELIUS_WEBHOOK_SECRET not configured, accepting unsigned requests")
     else:
         auth_header = request.headers.get("Authorization", "")
-        if not auth_header:
-            raise HTTPException(status_code=401, detail={"error": "missing authorization"})
-        if not secrets.compare_digest(auth_header, expected_secret):
+        bare = auth_header.removeprefix("Bearer ").strip()
+        authorized = bool(auth_header) and (
+            secrets.compare_digest(auth_header, expected_secret)
+            or secrets.compare_digest(bare, expected_secret)
+        )
+        if not authorized:
+            _record_webhook_auth_failure(bool(auth_header))
             raise HTTPException(status_code=401, detail={"error": "invalid authorization"})
 
     try:
@@ -769,15 +796,20 @@ async def helius_webhook(
 
 
 @router.get("/webhooks/helius/registration")
-async def helius_registration_status():
+async def helius_registration_status(live: bool = False):
     """
     Read-only: is this deployment's webhook registered with Helius?
-    Shows config presence (not values), the URL we register under, and the
-    outcome of the most recent registration attempt (runs at every boot).
+    Shows config presence (not values), the URL we register under, the
+    outcome of the most recent registration attempt (runs at every boot),
+    and rejected-delivery counts. With ?live=true, also fetches the
+    account's webhook configs from Helius as currently stored.
     """
-    from services.discovery.helius_webhooks import registration_status
+    from services.discovery.helius_webhooks import live_account_view, registration_status
 
-    return registration_status()
+    report = registration_status()
+    if live:
+        report["live"] = await live_account_view()
+    return report
 
 
 @router.post("/webhooks/helius/register")
