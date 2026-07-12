@@ -60,6 +60,49 @@ def test_swap_without_token_amount_leaves_price_untouched(db, monkeypatch):
     assert signal.price_usd is None and signal.market_cap is None
 
 
+def test_sol_amount_uses_largest_transfer_not_first(db, monkeypatch):
+    """The 1% fee/tip transfers must not be mistaken for the swap leg."""
+    from services.discovery.webhook_handler import HeliusWebhookProcessor
+
+    monkeypatch.setattr(
+        "services.execution.price_feed.get_sol_price_usd", lambda: 100.0
+    )
+    signal = _signal(db)
+    event = {
+        "nativeTransfers": [
+            {"amount": 20_000_000},     # 0.02 SOL fee comes first
+            {"amount": 2_000_000_000},  # 2 SOL actual swap
+        ],
+        "tokenTransfers": [{"mint": MINT, "tokenAmount": 50_000}],
+    }
+    HeliusWebhookProcessor(db)._update_metrics_from_event(signal, event, "SWAP")
+    assert signal.price_usd == pytest.approx(0.004)
+
+
+def test_one_hour_stats_from_wallet_activity(db, seed_activity, monkeypatch):
+    from services.discovery.webhook_handler import HeliusWebhookProcessor
+
+    monkeypatch.setattr(
+        "services.execution.price_feed.get_sol_price_usd", lambda: 100.0
+    )
+    signal = _signal(db)
+    seed_activity("w1", MINT, "buy", 1.0, "sig-1", mins_ago=5)
+    seed_activity("w2", MINT, "buy", 2.0, "sig-2", mins_ago=10)
+    seed_activity("w3", MINT, "buy", 3.0, "sig-3", mins_ago=15)
+    seed_activity("w4", MINT, "sell", 4.0, "sig-4", mins_ago=20)
+    seed_activity("w5", MINT, "buy", 100.0, "sig-5", mins_ago=90)  # outside 1h
+    db.commit()
+
+    event = {
+        "nativeTransfers": [{"amount": 1_000_000_000}],
+        "tokenTransfers": [{"mint": MINT, "tokenAmount": 1_000}],
+    }
+    HeliusWebhookProcessor(db)._update_metrics_from_event(signal, event, "SWAP")
+
+    assert signal.buy_ratio_1h == pytest.approx(75.0)  # 3 buys / 4 trades
+    assert signal.volume_1h == pytest.approx(1_000.0)  # 10 SOL x $100
+
+
 def test_parse_das_asset_extracts_fields():
     from services.discovery.token_metadata import parse_das_asset
 

@@ -551,6 +551,45 @@ class HeliusWebhookProcessor:
                     self.db, signal.token_address
                 )
 
+            # 1h rolling stats (volume + buy ratio) from recorded wallet
+            # activity — these columns rendered as permanent zeros before.
+            if signal.token_address:
+                try:
+                    from models.wallet import WalletActivity
+
+                    hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+                    rows = (
+                        self.db.query(
+                            WalletActivity.activity_type,
+                            func.count(WalletActivity.id),
+                            func.coalesce(func.sum(WalletActivity.sol_amount), 0.0),
+                        )
+                        .filter(
+                            WalletActivity.token_address == signal.token_address,
+                            WalletActivity.timestamp >= hour_ago,
+                        )
+                        .group_by(WalletActivity.activity_type)
+                        .all()
+                    )
+                    buys_1h = sells_1h = 0
+                    vol_sol = 0.0
+                    for kind, count, sol_sum in rows:
+                        vol_sol += float(sol_sum or 0)
+                        if kind == "buy":
+                            buys_1h = count
+                        elif kind == "sell":
+                            sells_1h = count
+                    if buys_1h + sells_1h > 0:
+                        signal.buy_ratio_1h = buys_1h / (buys_1h + sells_1h) * 100
+                    if vol_sol > 0:
+                        from services.execution.price_feed import get_sol_price_usd
+
+                        sol_usd = get_sol_price_usd()
+                        if sol_usd:
+                            signal.volume_1h = vol_sol * sol_usd
+                except Exception:
+                    pass  # stats are best-effort; never break ingestion
+
         # Calculate buy ratio
         total_txs = (signal.buys_5m or 0) + (signal.sells_5m or 0)
         if total_txs > 0:
@@ -582,17 +621,21 @@ class HeliusWebhookProcessor:
 
     def _extract_sol_amount(self, event_data: Dict) -> Optional[float]:
         """
-        Extract SOL amount from a swap event
+        SOL moved in the swap's MAIN leg. A pump.fun transaction carries
+        several native transfers (1% protocol fee, rent, tips) alongside
+        the swap itself; taking the first one made prices off by ~100x
+        whenever a fee/tip appeared before the swap leg — the largest
+        transfer is the trade.
         """
         try:
-            # Try to get from nativeTransfers
-            if 'nativeTransfers' in event_data and event_data['nativeTransfers']:
-                for transfer in event_data['nativeTransfers']:
-                    amount = transfer.get('amount', 0)
-                    if amount > 0:
-                        return amount / 1e9  # Convert lamports to SOL
-            return None
-        except:
+            amounts = [
+                t.get('amount', 0) for t in event_data.get('nativeTransfers') or []
+            ]
+            amounts = [a for a in amounts if isinstance(a, (int, float)) and a > 0]
+            if not amounts:
+                return None
+            return max(amounts) / 1e9  # lamports -> SOL
+        except Exception:
             return None
 
     def _extract_token_amount(self, event_data: Dict, mint: Optional[str]) -> Optional[float]:
