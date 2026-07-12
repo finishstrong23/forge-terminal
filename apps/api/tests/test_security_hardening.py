@@ -20,14 +20,23 @@ def test_webhook_rejects_nan_infinity(client, monkeypatch):
     assert r.status_code == 400
 
 
-def test_webhook_caps_event_array_length(client, monkeypatch):
+def test_webhook_truncates_oversized_batches_without_rejecting_delivery(
+    client, monkeypatch
+):
+    """A too-large batch must be truncated and still return 200 — an error
+    status here reads to Helius as a failed delivery, and repeated failures
+    are what got the webhook auto-disabled once already (ROADMAP M0)."""
+    from services.discovery import webhook_handler as wh
+
     monkeypatch.setattr(settings, "HELIUS_WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setattr(wh, "MAX_WEBHOOK_EVENTS", 100)
     r = client.post(
         "/api/v1/webhooks/helius",
         headers={"Authorization": "s3cret"},
-        json=[{"type": "SWAP", "signature": f"s{i}"} for i in range(101)],
+        json=[{"type": "SWAP", "signature": f"s{i}"} for i in range(150)],
     )
-    assert r.status_code == 413
+    assert r.status_code == 200
+    assert r.json()["events_received"] == 100
 
 
 def test_webhook_ops_endpoints_require_owner(client):

@@ -25,9 +25,14 @@ import secrets
 import httpx
 import asyncio
 
-# Largest event array we'll accept on the public webhook ingest — bounds the
-# per-request DB write amplification an attacker could drive.
-MAX_WEBHOOK_EVENTS = 100
+# Largest event array we'll fully process per webhook request — bounds
+# per-request DB write amplification an attacker could drive. Generous on
+# purpose: Helius batches real traffic into a single delivery during high-
+# volume periods, and REJECTING a legitimate oversized batch (non-2xx) is
+# read by Helius as a delivery failure — repeated failures are what got
+# this webhook auto-disabled in May. So we never reject for size; past the
+# cap we truncate and still return 200 (see helius_webhook below).
+MAX_WEBHOOK_EVENTS = 2000
 
 from core.database import get_db
 from models.token import HeliusEvent, TokenSignal
@@ -901,11 +906,17 @@ async def helius_webhook(
         if not isinstance(events, list):
             events = [events]
 
-        if len(events) > MAX_WEBHOOK_EVENTS:
-            raise HTTPException(
-                status_code=413,
-                detail=f"too many events (max {MAX_WEBHOOK_EVENTS} per request)",
+        oversized = len(events) > MAX_WEBHOOK_EVENTS
+        if oversized:
+            # Truncate, don't reject: an HTTP error here reads to Helius as
+            # a failed delivery, and repeated failures risk auto-disabling
+            # the webhook again. Process what we can, log the overage, and
+            # still return 200 so this delivery counts as successful.
+            logger.warning(
+                "webhook: %d events exceeds cap %d, processing first %d",
+                len(events), MAX_WEBHOOK_EVENTS, MAX_WEBHOOK_EVENTS,
             )
+            events = events[:MAX_WEBHOOK_EVENTS]
 
         processor = HeliusWebhookProcessor(db)
 
