@@ -34,6 +34,15 @@ import asyncio
 # cap we truncate and still return 200 (see helius_webhook below).
 MAX_WEBHOOK_EVENTS = 2000
 
+# Webhook-processing tasks expire if the worker can't reach them in this
+# many seconds. Under a Pump.fun firehose (tens of thousands of events/
+# hour) a single worker can't process every swap, and an unbounded queue
+# starves the periodic control-plane tasks (discovery, scoring, metadata
+# enrichment). Expiring stale per-event work keeps the queue shallow so
+# those keep running; a several-minute-old swap adds little and is dropped
+# rather than allowed to bury everything.
+WEBHOOK_TASK_EXPIRES_SECONDS = 300
+
 from core.database import get_db
 from models.token import HeliusEvent, TokenSignal
 from services.discovery.scoring_engine import score_token, scorer
@@ -928,10 +937,14 @@ async def helius_webhook(
                 # Store raw event (committed to DB immediately)
                 event = processor.store_raw_event(event_data)
 
-                # Try Celery dispatch first, fall back to sync if Redis is down
+                # Try Celery dispatch first, fall back to sync if Redis is down.
+                # expires= bounds queue latency so the firehose can't starve
+                # the periodic control-plane tasks.
                 try:
                     from services.discovery.tasks import process_webhook_event
-                    process_webhook_event.delay(event.id)
+                    process_webhook_event.apply_async(
+                        args=[event.id], expires=WEBHOOK_TASK_EXPIRES_SECONDS
+                    )
                     queued_count += 1
                 except Exception as celery_err:
                     # Redis/Celery unavailable — process synchronously

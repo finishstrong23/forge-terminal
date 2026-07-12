@@ -38,6 +38,7 @@ BEAT_STALENESS_LIMITS = {
     "record_shadow_trades": 5 * 60,         # runs every 60s
     "refresh_sol_price": 5 * 60,            # runs every 60s
     "enrich_token_metadata": 10 * 60,       # runs every 60s (DAS batch)
+    "sweep_stale_events": 20 * 60,          # runs every 5m
     "check_trade_confirmations": 10 * 60,   # runs every 2m
     "aggregate_metric_snapshots": 20 * 60,  # runs every 5m
     "score_wallets": 45 * 60,               # runs every 15m

@@ -155,6 +155,10 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.enrich_token_metadata",
         "schedule": 60.0,  # every 60 seconds
     },
+    "sweep-stale-events": {
+        "task": "tasks.sweep_stale_events",
+        "schedule": 300.0,  # every 5 minutes
+    },
     "check-trade-confirmations": {
         "task": "tasks.check_trade_confirmations",
         "schedule": 120.0,  # every 2 minutes

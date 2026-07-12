@@ -329,6 +329,48 @@ def record_shadow_trades():
 
 # ==================== EXECUTION ====================
 
+@celery_app.task(name="tasks.sweep_stale_events")
+def sweep_stale_events():
+    """
+    Periodic task: mark unprocessed HeliusEvents older than the webhook
+    task-expiry window as archived, so events whose processing task expired
+    under load don't accumulate as a forever-growing unprocessed_backlog.
+    Keeps the health metric meaningful; raw rows are retained for forensics.
+    Runs every 5 minutes.
+    """
+    from datetime import timedelta
+
+    from core.heartbeat import beat
+    from models.token import HeliusEvent
+
+    db = _get_db()
+    try:
+        # Older than 15 min: well past the 5-min task expiry, so anything
+        # still unprocessed was dropped under load (never queued/expired).
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+        archived = (
+            db.query(HeliusEvent)
+            .filter(HeliusEvent.processed.is_(False), HeliusEvent.received_at < cutoff)
+            .update(
+                {
+                    HeliusEvent.processed: True,
+                    HeliusEvent.processed_at: datetime.now(timezone.utc),
+                    HeliusEvent.processing_error: "archived: expired under load (not processed)",
+                },
+                synchronize_session=False,
+            )
+        )
+        db.commit()
+        beat("sweep_stale_events")
+        return {"status": "completed", "archived": archived}
+    except Exception as exc:
+        db.rollback()
+        print(f"Failed to sweep stale events: {exc}")
+        return {"status": "error", "error": str(exc)}
+    finally:
+        db.close()
+
+
 @celery_app.task(name="tasks.enrich_token_metadata")
 def enrich_token_metadata():
     """
