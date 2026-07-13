@@ -17,13 +17,28 @@ def _get_db():
 
 # ==================== WEBHOOK PROCESSING ====================
 
-@celery_app.task(name="tasks.process_webhook_event", bind=True, max_retries=3)
-def process_webhook_event(self, event_id: str):
+# A webhook event this old is no longer worth processing — the token has
+# already been discovered/scored via other paths, and under a firehose
+# these must drain fast so periodic tasks aren't starved. Kept a bit above
+# the dispatch expiry so in-flight tasks near the boundary still run.
+STALE_EVENT_MINUTES = 10
+
+
+@celery_app.task(name="tasks.process_webhook_event")
+def process_webhook_event(event_id: str):
     """
     Process a single Helius webhook event in the background.
 
     Called from webhook_handler.helius_webhook() after storing the raw event.
+
+    NO retry: under a Pump.fun firehose a fraction of events fail (pump.fun
+    Cloudflare blocks, transient DB load), and retrying each 3x created a
+    self-amplifying queue that starved the periodic control-plane tasks.
+    A single failed swap isn't worth re-queuing. Stale events are skipped
+    fast so the worker drains a backlog instead of grinding through it.
     """
+    from datetime import timedelta
+
     db = _get_db()
     try:
         from models.token import HeliusEvent
@@ -31,28 +46,49 @@ def process_webhook_event(self, event_id: str):
 
         event = db.query(HeliusEvent).filter(HeliusEvent.id == event_id).first()
         if not event:
-            print(f"Event {event_id} not found")
             return {"status": "not_found", "event_id": event_id}
 
         if event.processed:
             return {"status": "already_processed", "event_id": event_id}
 
+        # Fast-skip stale events: mark archived and return in microseconds so
+        # a large backlog drains without the expensive per-event processing.
+        received = event.received_at
+        if received is not None and received.tzinfo is None:
+            received = received.replace(tzinfo=timezone.utc)
+        if received is not None and (
+            datetime.now(timezone.utc) - received
+        ) > timedelta(minutes=STALE_EVENT_MINUTES):
+            event.processed = True
+            event.processed_at = datetime.now(timezone.utc)
+            event.processing_error = "archived: stale on pickup (not processed under load)"
+            db.commit()
+            return {"status": "stale_skipped", "event_id": event_id}
+
         processor = HeliusWebhookProcessor(db)
         signal = processor.process_event(event)
 
         if signal:
-            return {
-                "status": "processed",
-                "event_id": event_id,
-                "token": signal.symbol,
-                "momentum": signal.momentum_score,
-            }
+            return {"status": "processed", "event_id": event_id, "token": signal.symbol}
         return {"status": "skipped", "event_id": event_id}
 
     except Exception as exc:
+        # Log and drop — do NOT retry (see docstring). Mark the row so it
+        # doesn't linger in the unprocessed backlog.
         db.rollback()
         print(f"Task process_webhook_event failed for {event_id}: {exc}")
-        raise self.retry(exc=exc, countdown=5)
+        try:
+            from models.token import HeliusEvent
+
+            ev = db.query(HeliusEvent).filter(HeliusEvent.id == event_id).first()
+            if ev and not ev.processed:
+                ev.processed = True
+                ev.processed_at = datetime.now(timezone.utc)
+                ev.processing_error = f"failed (not retried): {exc}"[:500]
+                db.commit()
+        except Exception:
+            db.rollback()
+        return {"status": "error", "event_id": event_id}
     finally:
         db.close()
 
