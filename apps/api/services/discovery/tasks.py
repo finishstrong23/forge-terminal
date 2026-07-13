@@ -365,32 +365,64 @@ def record_shadow_trades():
 
 # ==================== EXECUTION ====================
 
+# How long to retain raw HeliusEvent rows. They exist for debugging/
+# reprocessing; at tens of thousands/hour their raw_data JSON is the main
+# disk consumer, so old rows are DELETED (not just marked) to bound disk.
+EVENT_RETENTION_HOURS = 6
+# Delete in bounded batches so one sweep can't lock the table or blow up a
+# transaction; the every-5-min cadence catches up over successive runs.
+SWEEP_DELETE_BATCH = 20_000
+
+
 @celery_app.task(name="tasks.sweep_stale_events")
 def sweep_stale_events():
     """
-    Periodic task: mark unprocessed HeliusEvents older than the webhook
-    task-expiry window as archived, so events whose processing task expired
-    under load don't accumulate as a forever-growing unprocessed_backlog.
-    Keeps the health metric meaningful; raw rows are retained for forensics.
-    Runs every 5 minutes.
+    Periodic task (every 5 min): bound the helius_events table on disk.
+
+    1. DELETE rows older than EVENT_RETENTION_HOURS — at firehose volume
+       their raw_data JSON is what fills the DB volume (it crashed Postgres
+       once). Deleting reclaims space; marking processed did not.
+    2. Mark any still-unprocessed rows newer than that but past the task
+       expiry as archived, so the unprocessed_backlog metric stays honest.
     """
     from datetime import timedelta
+
+    from sqlalchemy import text
 
     from core.heartbeat import beat
     from models.token import HeliusEvent
 
     db = _get_db()
     try:
-        # Older than 15 min: well past the 5-min task expiry, so anything
-        # still unprocessed was dropped under load (never queued/expired).
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=15)
+        now = datetime.now(timezone.utc)
+
+        # 1) Delete old rows in a bounded batch (portable across Postgres/
+        # SQLite via a subquery of ids).
+        delete_cutoff = now - timedelta(hours=EVENT_RETENTION_HOURS)
+        ids = [
+            row[0]
+            for row in db.query(HeliusEvent.id)
+            .filter(HeliusEvent.received_at < delete_cutoff)
+            .limit(SWEEP_DELETE_BATCH)
+            .all()
+        ]
+        deleted = 0
+        if ids:
+            deleted = (
+                db.query(HeliusEvent)
+                .filter(HeliusEvent.id.in_(ids))
+                .delete(synchronize_session=False)
+            )
+
+        # 2) Archive still-unprocessed rows past the task-expiry window.
+        archive_cutoff = now - timedelta(minutes=15)
         archived = (
             db.query(HeliusEvent)
-            .filter(HeliusEvent.processed.is_(False), HeliusEvent.received_at < cutoff)
+            .filter(HeliusEvent.processed.is_(False), HeliusEvent.received_at < archive_cutoff)
             .update(
                 {
                     HeliusEvent.processed: True,
-                    HeliusEvent.processed_at: datetime.now(timezone.utc),
+                    HeliusEvent.processed_at: now,
                     HeliusEvent.processing_error: "archived: expired under load (not processed)",
                 },
                 synchronize_session=False,
@@ -398,7 +430,7 @@ def sweep_stale_events():
         )
         db.commit()
         beat("sweep_stale_events")
-        return {"status": "completed", "archived": archived}
+        return {"status": "completed", "deleted": deleted, "archived": archived}
     except Exception as exc:
         db.rollback()
         print(f"Failed to sweep stale events: {exc}")
