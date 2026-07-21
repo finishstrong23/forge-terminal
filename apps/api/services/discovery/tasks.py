@@ -368,7 +368,9 @@ def record_shadow_trades():
 # How long to retain raw HeliusEvent rows. They exist for debugging/
 # reprocessing; at tens of thousands/hour their raw_data JSON is the main
 # disk consumer, so old rows are DELETED (not just marked) to bound disk.
-EVENT_RETENTION_HOURS = 6
+# 2h is ample for debugging and keeps the table small (~2h of volume);
+# raise only if the DB volume is comfortably large.
+EVENT_RETENTION_HOURS = 2
 # Delete in bounded batches so one sweep can't lock the table or blow up a
 # transaction; the every-5-min cadence catches up over successive runs.
 SWEEP_DELETE_BATCH = 20_000
