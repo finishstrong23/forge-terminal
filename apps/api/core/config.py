@@ -49,6 +49,14 @@ class Settings(BaseSettings):
     DISCOVERY_BATCH_SIZE: int = 20
     DISCOVERY_ENABLED: bool = True
 
+    # Helius credit control. The program-wide webhook is a firehose (~95% of
+    # credit spend); when disabled the app deletes it and relies on poll-based
+    # discovery only. Poll cadences (seconds) drive the remaining DAS spend —
+    # 300s keeps usage well within the free 1M/month tier pre-launch.
+    WEBHOOK_ENABLED: bool = True
+    DISCOVERY_POLL_SECONDS: float = 300.0
+    ENRICH_POLL_SECONDS: float = 300.0
+
     MAX_TOKENS_FREE: int = 20
     FREE_TIER_DELAY_MINUTES: int = 15
     FREE_TIER_MAX_DAILY_SIGNALS: int = 50

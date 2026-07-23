@@ -34,10 +34,10 @@ router = APIRouter()
 # task name -> max seconds since last heartbeat before it counts as stale.
 # Derived from the beat schedule (celery_app.py) with generous headroom.
 BEAT_STALENESS_LIMITS = {
-    "discover_new_tokens": 5 * 60,          # runs every 60s
+    "discover_new_tokens": 15 * 60,         # poll cadence tunable (default 5m)
     "record_shadow_trades": 5 * 60,         # runs every 60s
     "refresh_sol_price": 5 * 60,            # runs every 60s
-    "enrich_token_metadata": 10 * 60,       # runs every 60s (DAS batch)
+    "enrich_token_metadata": 15 * 60,       # poll cadence tunable (default 5m)
     "sweep_stale_events": 20 * 60,          # runs every 5m
     "check_trade_confirmations": 10 * 60,   # runs every 2m
     "aggregate_metric_snapshots": 20 * 60,  # runs every 5m

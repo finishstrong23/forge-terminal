@@ -55,6 +55,12 @@ if _SENTRY_DSN:
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CELERY_ALWAYS_EAGER = os.getenv("CELERY_ALWAYS_EAGER", "false").lower() == "true"
 
+# Poll cadences (seconds) — these two beat tasks are the only recurring
+# Helius consumers, so they're tunable from the environment to control
+# credit spend. Default 300s (5 min) keeps free-tier usage sustainable.
+DISCOVERY_POLL_SECONDS = float(os.getenv("DISCOVERY_POLL_SECONDS", "300"))
+ENRICH_POLL_SECONDS = float(os.getenv("ENRICH_POLL_SECONDS", "300"))
+
 celery_app = Celery(
     "pumpfair",
     broker=REDIS_URL,
@@ -137,7 +143,7 @@ celery_app.conf.beat_schedule = {
     },
     "discover-new-tokens": {
         "task": "tasks.discover_new_tokens",
-        "schedule": 60.0,  # every 60 seconds
+        "schedule": DISCOVERY_POLL_SECONDS,  # Helius searchAssets — cost-tunable
     },
     "score-wallets-15m": {
         "task": "tasks.score_wallets",
@@ -153,7 +159,7 @@ celery_app.conf.beat_schedule = {
     },
     "enrich-token-metadata": {
         "task": "tasks.enrich_token_metadata",
-        "schedule": 60.0,  # every 60 seconds
+        "schedule": ENRICH_POLL_SECONDS,  # Helius getAssetBatch — cost-tunable
     },
     "sweep-stale-events": {
         "task": "tasks.sweep_stale_events",

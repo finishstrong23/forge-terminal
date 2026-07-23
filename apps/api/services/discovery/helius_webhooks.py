@@ -70,6 +70,43 @@ def _record(report: dict) -> dict:
     return report
 
 
+async def _disable_webhook(api_key: str, target_url: str) -> dict:
+    """Delete this deployment's webhook(s) on Helius so events (and their
+    credit cost) stop. Idempotent — no-op if none are registered."""
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            listing = await client.get(
+                f"{HELIUS_API_BASE}/webhooks", params={"api-key": api_key}
+            )
+            if listing.status_code != 200:
+                return {
+                    "status": "error",
+                    "step": "list",
+                    "http_status": listing.status_code,
+                    "detail": listing.text[:300],
+                }
+            ours = [
+                w for w in (listing.json() or [])
+                if w.get("webhookURL") == target_url
+            ]
+            deleted = []
+            for w in ours:
+                webhook_id = w.get("webhookID")
+                resp = await client.delete(
+                    f"{HELIUS_API_BASE}/webhooks/{webhook_id}",
+                    params={"api-key": api_key},
+                )
+                deleted.append({"webhook_id": webhook_id, "http_status": resp.status_code})
+            logger.info("helius webhook disabled (deleted %d) — poll-only mode", len(deleted))
+            return {
+                "status": "disabled",
+                "reason": "WEBHOOK_ENABLED=false — poll-only mode to save Helius credits",
+                "deleted": deleted,
+            }
+    except Exception as exc:
+        return {"status": "error", "step": "disable", "detail": f"{type(exc).__name__}: {exc}"}
+
+
 async def ensure_webhook_registered() -> dict:
     """
     Create-or-update the Helius webhook for this deployment. Never raises;
@@ -85,6 +122,12 @@ async def ensure_webhook_registered() -> dict:
             "status": "skipped",
             "reason": "no public domain known (set PUBLIC_API_URL or run on Railway)",
         })
+
+    # Credit control: when the webhook is disabled, delete it on Helius so it
+    # stops sending (and thus stops billing) — not re-registering is not
+    # enough; an already-registered webhook keeps firing until deleted.
+    if not settings.WEBHOOK_ENABLED:
+        return _record(await _disable_webhook(api_key, target_url))
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -191,6 +234,7 @@ async def ensure_webhook_registered() -> dict:
 def registration_status() -> dict:
     """Read-only view for the status endpoint: config + last attempt."""
     return {
+        "webhook_enabled": settings.WEBHOOK_ENABLED,
         "helius_api_key_set": bool(settings.HELIUS_API_KEY),
         "webhook_auth_secret_set": bool(settings.HELIUS_WEBHOOK_SECRET),
         "target_url": target_webhook_url(),

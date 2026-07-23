@@ -30,6 +30,31 @@ def test_ensure_registration_skips_without_public_domain(monkeypatch):
     assert "public domain" in report["reason"]
 
 
+def test_webhook_disabled_deletes_and_ingest_ignores(client, monkeypatch):
+    """WEBHOOK_ENABLED=false: registration deletes on Helius and the ingest
+    endpoint acknowledges without processing (poll-only credit-saving mode)."""
+    from services.discovery import helius_webhooks
+
+    monkeypatch.setattr(settings, "WEBHOOK_ENABLED", False)
+    monkeypatch.setattr(settings, "HELIUS_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "PUBLIC_API_URL", "https://api.example.com")
+
+    called = {}
+
+    async def fake_disable(api_key, target_url):
+        called["api_key"] = api_key
+        return {"status": "disabled", "deleted": []}
+
+    monkeypatch.setattr(helius_webhooks, "_disable_webhook", fake_disable)
+    report = asyncio.run(helius_webhooks.ensure_webhook_registered())
+    assert report["status"] == "disabled"
+    assert called["api_key"] == "test-key"
+
+    # Ingest short-circuits regardless of auth/body.
+    r = client.post("/api/v1/webhooks/helius", json=[{"type": "SWAP"}])
+    assert r.status_code == 200 and r.json().get("ignored") is True
+
+
 def test_target_url_prefers_explicit_setting(monkeypatch):
     from services.discovery import helius_webhooks
 
@@ -53,6 +78,7 @@ def test_registration_status_requires_owner_and_is_masked(client, owner_auth):
     assert r.status_code == 200
     body = r.json()
     assert set(body) == {
+        "webhook_enabled",
         "helius_api_key_set",
         "webhook_auth_secret_set",
         "target_url",

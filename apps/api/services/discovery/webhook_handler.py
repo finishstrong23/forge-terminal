@@ -881,6 +881,12 @@ async def helius_webhook(
     NaN/Infinity constants are rejected (they survive json.loads and would
     poison price/market-cap math downstream).
     """
+    # Poll-only mode: if the webhook is disabled (for Helius credit savings)
+    # but Helius still delivers a straggler before deletion propagates,
+    # acknowledge it (200) without any DB work.
+    if not settings.WEBHOOK_ENABLED:
+        return {"success": True, "ignored": True, "reason": "webhook disabled (poll-only mode)"}
+
     # Verify Helius webhook authorization (Authorization header carries the
     # webhook's configured authHeader — accept it raw or Bearer-prefixed).
     expected_secret = settings.HELIUS_WEBHOOK_SECRET
