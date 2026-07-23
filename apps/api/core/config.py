@@ -80,6 +80,12 @@ class Settings(BaseSettings):
         "finishstrong23@gmail.com",
     ]
 
+    # Owner accounts can't be self-registered (privilege is granted by
+    # OWNER_EMAILS membership). When set, the first owner email is seeded
+    # with this password on startup if it doesn't exist yet — so a database
+    # reset doesn't lock the owner out. Change the password after first login.
+    OWNER_INITIAL_PASSWORD: Optional[str] = None
+
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
 
     @property

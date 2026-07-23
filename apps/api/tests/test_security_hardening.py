@@ -127,6 +127,30 @@ def test_owner_email_cannot_be_registered(client):
     assert r.status_code == 403
 
 
+def test_owner_seed_creates_account_when_configured(db, monkeypatch):
+    """The startup seed recreates the owner after a DB reset so the
+    non-registerable owner email isn't permanently locked out."""
+    import main
+    from models.user import User
+
+    email = settings.OWNER_EMAILS[0].lower()
+    assert db.query(User).filter(User.email == email).first() is None
+
+    # No password -> no-op.
+    monkeypatch.setattr(settings, "OWNER_INITIAL_PASSWORD", None)
+    main._seed_owner_account()
+    assert db.query(User).filter(User.email == email).first() is None
+
+    # Password set -> owner seeded, and it can log in.
+    monkeypatch.setattr(settings, "OWNER_INITIAL_PASSWORD", "seededpass123")
+    main._seed_owner_account()
+    owner = db.query(User).filter(User.email == email).first()
+    assert owner is not None
+    # Idempotent second call.
+    main._seed_owner_account()
+    assert db.query(User).filter(User.email == email).count() == 1
+
+
 def test_purposeless_token_is_rejected(client, db):
     """A signed token without a purpose claim must not authenticate."""
     from jose import jwt

@@ -32,8 +32,35 @@ if settings.SENTRY_DSN:
     )
 
 
+def _seed_owner_account() -> None:
+    """Create the first owner account from OWNER_INITIAL_PASSWORD if it does
+    not exist. Owner emails can't be self-registered, so this keeps a
+    database reset from locking the owner out. Idempotent; never fatal."""
+    if not settings.OWNER_INITIAL_PASSWORD or not settings.OWNER_EMAILS:
+        return
+    try:
+        from core.database import SessionLocal
+        from core.security import hash_password
+        from models.user import User
+
+        email = settings.OWNER_EMAILS[0].lower()
+        db = SessionLocal()
+        try:
+            if db.query(User.id).filter(User.email == email).first() is None:
+                db.add(User(email=email,
+                            password_hash=hash_password(settings.OWNER_INITIAL_PASSWORD)))
+                db.commit()
+                logger.info("seeded owner account %s", email)
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("owner seed skipped: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Ensure the owner account exists (no-op unless OWNER_INITIAL_PASSWORD set).
+    _seed_owner_account()
     # Start the Redis pubsub subscriber that fans messages out to WS clients.
     subscriber_task = asyncio.create_task(subscribe_and_fanout())
     logger.info("lifespan: pubsub subscriber task started")
