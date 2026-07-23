@@ -57,11 +57,13 @@ class Settings(BaseSettings):
     DISCOVERY_POLL_SECONDS: float = 300.0
     ENRICH_POLL_SECONDS: float = 300.0
 
-    MAX_TOKENS_FREE: int = 20
+    # Tier levers actually enforced: free/anonymous callers get signals
+    # delayed FREE_TIER_DELAY_MINUTES (routes/discovery.py, signals.py) and
+    # are limited to FREE_TIER_MAX_ACTIVE_FOLLOWS follows (copy_subscriptions.py).
+    # (Removed unenforced token-count and daily-signal caps — the delay is the
+    # real free/paid differentiator; add a daily cap deliberately later if
+    # conversion data justifies it.)
     FREE_TIER_DELAY_MINUTES: int = 15
-    FREE_TIER_MAX_DAILY_SIGNALS: int = 50
-    MAX_TOKENS_TRADER: int = 100
-    MAX_TOKENS_PRO: int = 500
     FREE_TIER_MAX_ACTIVE_FOLLOWS: int = 3
     PRO_TIER_MAX_ACTIVE_FOLLOWS: int = 50
 

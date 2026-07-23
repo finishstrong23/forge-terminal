@@ -1,30 +1,43 @@
 # STATUS — forge-terminal
 
-> Updated: 2026-07-21
+> Updated: 2026-07-23
 
 ## Current phase
-P1 "Credibility" shipped and verifying in production; P2 "Prove it" is
-accumulating a week of wallet-score data before the paid P3 beta (Stripe,
-~$49/mo Pro tier).
+Pre-launch, **path-to-first-revenue**. Running lean on Helius free tier in
+poll-only mode. Plan: finish the launch-gating chores (legal review, Stripe
+config, domain/email), then flip on the paid Helius tier + firehose at
+launch to relight Copy Intelligence and open the paid "Intelligence Beta".
 
 ## Last shipped
-2026-07-21 — tightened raw-event retention to 2 hours to keep the Postgres
-volume small. Capped a week of production hardening: retry-storm root-cause
-fix, bounded webhook queue, full-app security audit fixes, P3 prep (pricing
-page, daily loss cap, refresh tokens).
+2026-07-23 — Helius credit control: `WEBHOOK_ENABLED` flag (poll-only mode
+deletes the firehose webhook to cut ~97% of credit spend) + env-tunable
+poll cadences. Removed four unenforced tier-cap settings. Prior: retry-storm
++ queue-starvation + Postgres disk-full root-cause fixes, full security
+audit, Postgres rebuilt.
+
+## Important: Copy Intelligence is dormant
+Poll-only mode means `WalletActivity` stops updating (it's fed only by the
+webhook firehose), so the leaderboard, wallet scoring, and shadow trades go
+stale. This is a deliberate cost decision — Discovery still works. Copy
+Intelligence relights automatically when `WEBHOOK_ENABLED=true` on a paid
+Helius tier at launch.
 
 ## Next action
-Verify the P1 exit test in production (feed shows real names/images/prices,
-uptime monitor green), then run TESTING.md sections A–G as P2 data accumulates.
+Verify the M3 exit test in prod (dust swap on /execute → position on
+/portfolio) in poll-only mode. In parallel, start the launch-gating chores
+(legal review first — longest lead).
 
 ## Blockers
 - None technical.
 
-## Waiting on
-- A week of accumulated wallet scores (P2 exit condition).
-- Lawyer legal review before Stripe goes live (P3 gate).
+## Waiting on (launch gates)
+- Qualified-counsel review of the template legal pages (hard gate before
+  charging).
+- Stripe live config (dashboard Products/Prices + env vars).
+- Domain + SMTP; paid Helius tier (flip at launch).
 
 ## Notes
-Revenue math: break-even ≈ 2 Pro subscribers. Running cost ~$5/mo now,
-~$55–75/mo at P3 (Helius paid tier + Railway overage). Roadmap and exit
-tests live in ROADMAP.md; launch verification in TESTING.md.
+Revenue math: break-even ≈ 2 Pro subscribers (~$49/mo). Cost ~$5/mo now,
+~$55–75/mo at launch (paid Helius + Railway). Full plan in
+`~/.claude/plans/agile-plotting-melody.md`; roadmap/exit tests in
+ROADMAP.md; launch verification in TESTING.md.
